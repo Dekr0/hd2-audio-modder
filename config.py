@@ -2,12 +2,26 @@ import os
 import pickle
 import tkinter.messagebox as message_box
 import tkinter.filedialog as file_dialog
+import uuid
 
 from log import logger
+
+
+class Separator:
+
+    version = 1
+    entry_type = "sep"
+
+    def __init__(self, label: str, linked_entry_id: int):
+        self.id = uuid.uuid4().hex
+        self.label = label
+        self.linked_entry_id = linked_entry_id
+
 
 class Config:
 
     def __init__(self, game_data_path: str,
+                 separators: set[Separator] = set(),
                  workspace_paths: set[str] = set(),
                  recent_files: list[str] = [],
                  theme: str = "dark_mode",):
@@ -15,6 +29,7 @@ class Config:
         self.workspace_paths = workspace_paths
         self.theme = theme
         self.recent_files = recent_files
+        self.separators = separators
 
     """
     @return (int): A status code to tell whether there are new workspace being 
@@ -42,6 +57,14 @@ class Config:
                                     if os.path.exists(p)])
         return self.workspace_paths
 
+    def add_separator(self, label: str, linked_entry_id: int) -> str:
+        separator = Separator(label, linked_entry_id)
+        if separator.id in self.separators:
+            logger.error("Hash collision when creating a new separator!")
+            return ""
+        self.separators.add(separator)
+        return separator.id
+
 def load_config(config_path: str = "config.pickle") -> Config | None:
     if os.path.exists(config_path):
         cfg: Config | None = None
@@ -67,13 +90,17 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             cfg.workspace_paths = set([p for p in cfg.workspace_paths 
                                    if os.path.exists(p)])
         try: # for backwards compatibility with configs created before these were added
-            t = cfg.theme
+            _ = cfg.theme
         except:
             cfg.theme = "dark_mode"
         try:
-            f = cfg.recent_files
+            _ = cfg.recent_files
         except:
             cfg.recent_files = []
+        try:
+            _ = cfg.separators
+        except:
+            cfg.separators = set()
         cfg.save_config()
         return cfg
 
