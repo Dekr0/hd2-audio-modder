@@ -10,7 +10,7 @@ from log import logger
 class Separator:
 
     version = 1
-    entry_type = "sep"
+    entry_type = "Separator"
 
     def __init__(self, label: str, linked_entry_id: int):
         self.id = uuid.uuid4().hex
