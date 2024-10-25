@@ -2663,7 +2663,12 @@ class MainWindow:
             values = self.treeview.item(selects[0], option="values")
             if isinstance(values, tuple):
                 assert(len(values) == 1)
-            if values[0] != cfg.Separator.entry_type:
+
+            # Below condition check for creating separator is not great
+            is_separator = values[0] == cfg.Separator.entry_type
+            is_audio_source = values[0] == "Audio Source"
+            allowed_separation = not is_separator and is_audio_source
+            if allowed_separation:
                 tags = self.treeview.item(selects[-1], option="tags")
                 if isinstance(tags, tuple):
                     assert(len(tags) == 1)
@@ -2673,18 +2678,17 @@ class MainWindow:
                     command=lambda: self.create_separator(selects[0], 
                                                           self.right_click_id)
                 )
-
             if not all_audio:
                 if not is_single:
                     return
-                if values[0] == cfg.Separator.entry_type:
+                if is_separator:
                     self.right_click_menu.add_command(
                             label="Delete separator",
                             command=lambda: self.delete_separator(selects[0])
                             )
                     self.right_click_menu.tk_popup(event.x_root, event.y_root)
                     return
-                assert(False)
+                return
 
             self.right_click_menu.add_command(
                 label=("Copy File ID" if is_single else "Copy File IDs"),
@@ -2764,6 +2768,9 @@ class MainWindow:
                              text=label,
                              tags="random_id", 
                              values=(cfg.Separator.entry_type,))
+        self.treeview.tag_configure(str(linked_entry_id),
+                                    background="#073642",
+                                    foreground="#586e75")
 
     def delete_separator(self, treeview_item_id: str | int):
         self.treeview.delete(treeview_item_id)
