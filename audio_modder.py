@@ -2756,7 +2756,9 @@ class MainWindow:
         # id = self.app_state.add_separator(label, linked_entry_id)
         # if id == "":
         #     return
-        self.treeview.insert(parent, idx, tags="random_id", 
+        self.treeview.insert(parent, idx,
+                             text=label,
+                             tags="random_id", 
                              values=(cfg.Separator.entry_type,))
 
     def delete_separator(self, treeview_item_id: str | int):
@@ -2791,10 +2793,23 @@ class MainWindow:
             self.search_label['text'] = f"{self.search_result_index+1}/{len(self.search_results)}"
 
     def show_info_window(self, event=None):
-        if len(self.treeview.selection()) != 1:
+        selects = self.treeview.selection()
+        if len(selects) != 1:
             return
-        selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
-        selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
+
+        select = selects[0]
+        values = self.treeview.item(select, option="values")
+        if isinstance(values, tuple):
+            assert(len(values) == 1)
+
+        selection_type = values[0]
+        if selection_type == cfg.Separator.entry_type:
+            return
+
+        tags = self.treeview.item(select, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        selection_id = int(tags[0])
         for child in self.entry_info_panel.winfo_children():
             child.forget()
         if selection_type == "String":
