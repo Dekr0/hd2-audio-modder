@@ -2654,38 +2654,42 @@ class MainWindow:
             all_audio = True
             for select in selects:
                 values = self.treeview.item(select, option="values")
-                assert(len(values) == 1)
+                if isinstance(values, tuple):
+                    assert(len(values) == 1)
                 if values[0] != "Audio Source":
                     all_audio = False
                     break
 
-            tags = self.treeview.item(selects[-1], option="tags")
-            assert(len(tags) == 1)
-            self.right_click_id = int(tags[0])
-
             values = self.treeview.item(selects[0], option="values")
-            assert(len(values) == 1)
-            
-            if (values[0] != cfg.Separator.entry_type):
+            if isinstance(values, tuple):
+                assert(len(values) == 1)
+            if values[0] != cfg.Separator.entry_type:
+                tags = self.treeview.item(selects[-1], option="tags")
+                if isinstance(tags, tuple):
+                    assert(len(tags) == 1)
+                self.right_click_id = int(tags[0])
                 self.right_click_menu.add_command(
                     label="Create a separator",
                     command=lambda: self.create_separator(selects[0], 
                                                           self.right_click_id)
                 )
 
-            self.right_click_menu.add_command(
-                label=("Copy File ID" if is_single else "Copy File IDs"),
-                command=self.copy_id
-            )
-
             if not all_audio:
                 if not is_single:
                     return
-                if (values[0] == cfg.Separator.entry_type):
+                if values[0] == cfg.Separator.entry_type:
                     self.right_click_menu.add_command(
                             label="Delete separator",
                             command=lambda: self.delete_separator(selects[0])
                             )
+                    self.right_click_menu.tk_popup(event.x_root, event.y_root)
+                    return
+                assert(False)
+
+            self.right_click_menu.add_command(
+                label=("Copy File ID" if is_single else "Copy File IDs"),
+                command=self.copy_id
+            )
 
             self.right_click_menu.add_command(
                 label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
