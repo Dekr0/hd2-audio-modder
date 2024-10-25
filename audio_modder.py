@@ -13,7 +13,7 @@ from itertools import takewhile
 from math import ceil
 from tkinter import *
 from tkinter import ttk
-from tkinter import filedialog
+from tkinter import simpledialog, filedialog
 from tkinter.filedialog import askopenfilename
 from typing import Any, Literal, Tuple, Union
 
@@ -2659,18 +2659,34 @@ class MainWindow:
                     all_audio = False
                     break
 
+            tags = self.treeview.item(selects[-1], option="tags")
+            assert(len(tags) == 1)
+            self.right_click_id = int(tags[0])
+
+            values = self.treeview.item(selects[0], option="values")
+            assert(len(values) == 1)
+            
+            if (values[0] != cfg.Separator.entry_type):
+                self.right_click_menu.add_command(
+                    label="Create a separator",
+                    command=lambda: self.create_separator(selects[0], 
+                                                          self.right_click_id)
+                )
+
             self.right_click_menu.add_command(
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
 
             if not all_audio:
-                return
+                if not is_single:
+                    return
+                if (values[0] == cfg.Separator.entry_type):
+                    self.right_click_menu.add_command(
+                            label="Delete separator",
+                            command=lambda: self.delete_separator(selects[0])
+                            )
 
-            tags = self.treeview.item(selects[-1], option="tags")
-            assert(len(tags) == 1)
-            self.right_click_id = int(tags[0])
-            
             self.right_click_menu.add_command(
                 label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
                 command=self.dump_as_wem
@@ -2727,6 +2743,24 @@ class MainWindow:
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
                 self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
+
+    def create_separator(self, 
+                         treeview_item_id: str | int, 
+                         linked_entry_id: int):
+        parent = self.treeview.parent(treeview_item_id)
+        idx = self.treeview.index(treeview_item_id)
+        label = simpledialog.askstring("Create new separator", 
+                                       "Enter name of the new separator")
+        if label == None:
+            return
+        # id = self.app_state.add_separator(label, linked_entry_id)
+        # if id == "":
+        #     return
+        self.treeview.insert(parent, idx, tags="random_id", 
+                             values=(cfg.Separator.entry_type,))
+
+    def delete_separator(self, treeview_item_id: str | int):
+        self.treeview.delete(treeview_item_id)
 
     def set_language(self):
         global language
