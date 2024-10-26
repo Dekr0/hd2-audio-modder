@@ -3075,9 +3075,16 @@ class MainWindow:
     """
     def check_modified(self): 
         for child in self.treeview.get_children():
+            values = self.treeview.item(child, option="values")
+            if isinstance(values, tuple):
+                assert(len(values) == 1)
+            if values[0] == self.entry_type_separator:
+                continue
             self.clear_treeview_background(child)
+
         bg: Any
         fg: Any
+
         for audio in self.file_handler.get_audio().values():
             is_modified = audio.modified or audio.get_track_info() is not None \
                     and audio.get_track_info().modified
