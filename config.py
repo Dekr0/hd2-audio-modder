@@ -12,16 +12,16 @@ class Separator:
     version = 1
     entry_type = "Separator"
 
-    def __init__(self, label: str, linked_entry_id: int):
-        self.id = uuid.uuid4().hex
+    def __init__(self, id: str, label: str, linked_entry_id: int):
+        self.id = id
         self.label = label
-        self.linked_entry_id = linked_entry_id
-
+        self.linked_entry_id = linked_entry_id 
 
 class Config:
 
     def __init__(self, game_data_path: str,
-                 separators: set[Separator] = set(),
+                 separators: dict[str, Separator] = {},
+                 separated_entries: dict[int, list[str]] = {},
                  workspace_paths: set[str] = set(),
                  recent_files: list[str] = [],
                  theme: str = "dark_mode",):
@@ -30,6 +30,7 @@ class Config:
         self.theme = theme
         self.recent_files = recent_files
         self.separators = separators
+        self.separated_entries = separated_entries
 
     """
     @return (int): A status code to tell whether there are new workspace being 
@@ -58,12 +59,25 @@ class Config:
         return self.workspace_paths
 
     def add_separator(self, label: str, linked_entry_id: int) -> str:
-        separator = Separator(label, linked_entry_id)
-        if separator.id in self.separators:
+        id = uuid.uuid4().hex
+        if id in self.separators:
             logger.error("Hash collision when creating a new separator!")
             return ""
-        self.separators.add(separator)
+        separator = Separator(id, label, linked_entry_id)
+        self.separators[id] = separator
+        if linked_entry_id not in self.separated_entries:
+            self.separated_entries[linked_entry_id] = [separator.id]
+        else:
+            self.separated_entries[linked_entry_id].append(separator.id)
         return separator.id
+
+    def remove_separator(self, id: str):
+        if id not in self.separators:
+            return
+        linked_entry_id = self.separators.pop(id).linked_entry_id
+        if linked_entry_id not in self.separated_entries:
+            return
+        self.separated_entries[linked_entry_id].remove(id)
 
 def load_config(config_path: str = "config.pickle") -> Config | None:
     if os.path.exists(config_path):
@@ -89,7 +103,10 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             cfg.game_data_path = game_data_path
             cfg.workspace_paths = set([p for p in cfg.workspace_paths 
                                    if os.path.exists(p)])
-        try: # for backwards compatibility with configs created before these were added
+        # for backwards compatibility with config created before these were added
+        # Suggestion for backward compatibility: version number. If version 
+        # number is missing, assume it's the oldest version.
+        try: 
             _ = cfg.theme
         except:
             cfg.theme = "dark_mode"
@@ -100,7 +117,11 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
         try:
             _ = cfg.separators
         except:
-            cfg.separators = set()
+            cfg.separators = {}
+        try:
+            _ = cfg.separated_entries
+        except:
+            cfg.separated_entries = {}
         cfg.save_config()
         return cfg
 
