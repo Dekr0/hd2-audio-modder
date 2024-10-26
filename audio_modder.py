@@ -2469,6 +2469,15 @@ class MainWindow:
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
 
         self.root.resizable(False, False)
+        open_last_recent_file = len(self.app_state.recent_files) > 0 and \
+                os.path.exists(self.app_state.recent_files[-1])
+        if open_last_recent_file:
+            self.root.after(
+                    100, 
+                    lambda: self.load_archive(
+                        archive_file=self.app_state.recent_files[-1]
+                        )
+                    )
         self.root.mainloop()
         
     def search_bar_on_enter_key(self, event):
@@ -2753,27 +2762,32 @@ class MainWindow:
                 self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
 
     def create_separator(self, 
-                         treeview_item_id: str | int, 
+                         linked_entry_item_id: str | int, 
                          linked_entry_id: int):
-        parent = self.treeview.parent(treeview_item_id)
-        idx = self.treeview.index(treeview_item_id)
+        parent_item_id = self.treeview.parent(linked_entry_item_id)
+        idx = self.treeview.index(linked_entry_item_id)
         label = simpledialog.askstring("Create new separator", 
                                        "Enter name of the new separator")
         if label == None:
             return
-        # id = self.app_state.add_separator(label, linked_entry_id)
-        # if id == "":
-        #     return
-        self.treeview.insert(parent, idx,
+        separator_id = self.app_state.add_separator(label, linked_entry_id)
+        if separator_id == "":
+            return
+        self.treeview.insert(parent_item_id, idx,
                              text=label,
-                             tags="random_id", 
+                             tags=separator_id, 
                              values=(cfg.Separator.entry_type,))
-        self.treeview.tag_configure(str(linked_entry_id),
+        self.treeview.tag_configure(separator_id,
                                     background="#073642",
                                     foreground="#586e75")
 
     def delete_separator(self, treeview_item_id: str | int):
+        tags = self.treeview.item(treeview_item_id, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        separator_id = tags[0]
         self.treeview.delete(treeview_item_id)
+        self.app_state.remove_separator(separator_id)
 
     def set_language(self):
         global language
@@ -2863,7 +2877,13 @@ class MainWindow:
 
     def create_treeview_entry(self, entry, parentItem=""):
         if entry is None: return
-        tree_entry = self.treeview.insert(parentItem, END, tag=entry.get_id())
+        entry_id: int = entry.get_id()
+
+        separators = self.app_state.get_separators_by_entry_id(entry_id)
+        for separator in separators:
+            self.treeview.insert(parentItem, END, tags=separator.id)
+
+        tree_entry = self.treeview.insert(parentItem, END, tags=str(entry_id))
         if isinstance(entry, WwiseBank):
             name = entry.dep.data.split('/')[-1]
             entry_type = "Sound Bank"
