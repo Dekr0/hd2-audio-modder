@@ -2813,8 +2813,11 @@ class MainWindow:
         if separator_id not in self.app_state.separators:
             return
 
+        separator = self.app_state.separators[separator_id]
+
         label = simpledialog.askstring("Renaming the current separator",
-                                       "Enter new name of the separator")
+                                       "Enter new name of the separator",
+                                       initialvalue=separator.label)
         if label == None:
             return
         self.app_state.separators[separator_id].label = label
