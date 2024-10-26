@@ -2935,7 +2935,7 @@ class MainWindow:
         self.search_label['text'] = ""
         self.search_text_var.set("")
             
-    def create_hierarchy_view(self):
+    def create_hierarchy_view(self, is_load=False):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
@@ -2961,9 +2961,10 @@ class MainWindow:
                 e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
                     self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
-        self.check_modified()
+        if not is_load:
+            self.check_modified()
                 
-    def create_source_view(self):
+    def create_source_view(self, is_load=True):
         self.clear_search()
         existing_sources = set()
         self.treeview.delete(*self.treeview.get_children())
@@ -2981,7 +2982,8 @@ class MainWindow:
                 e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
                     self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
-        self.check_modified()
+        if not is_load:
+            self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == self.entry_type_string:
@@ -3047,9 +3049,9 @@ class MainWindow:
             self.update_language_menu()
             self.update_recent_files(filepath=self.file_handler.file_reader.path)
             if self.selected_view.get() == "SourceView":
-                self.create_source_view()
+                self.create_source_view(is_load=True)
             else:
-                self.create_hierarchy_view()
+                self.create_hierarchy_view(is_load=True)
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
         else:
