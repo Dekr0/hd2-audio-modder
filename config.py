@@ -79,6 +79,17 @@ class Config:
             return
         self.separated_entries[linked_entry_id].remove(id)
 
+    def get_separators_by_entry_id(self, entry_id: int) -> list[Separator]:
+        if entry_id not in self.separated_entries:
+            return []
+        separators: list[Separator] = []
+        for separator_id in self.separated_entries[entry_id]:
+            if separator_id not in self.separators:
+                logger.error(f"Separator {separator_id} does not exist")
+                continue
+            separators.append(self.separators[separator_id])
+        return separators
+
 def load_config(config_path: str = "config.pickle") -> Config | None:
     if os.path.exists(config_path):
         cfg: Config | None = None
