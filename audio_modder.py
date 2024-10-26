@@ -2706,6 +2706,10 @@ class MainWindow:
                             label="Delete separator",
                             command=lambda: self.delete_separator(selects[0])
                             )
+                    self.right_click_menu.add_command(
+                            label="Rename separator",
+                            command=lambda: self.rename_separator(selects[0])
+                            )
                     self.right_click_menu.tk_popup(event.x_root, event.y_root)
                     return
                 return
@@ -2799,6 +2803,23 @@ class MainWindow:
         separator_id = tags[0]
         self.treeview.delete(treeview_item_id)
         self.app_state.remove_separator(separator_id)
+
+    def rename_separator(self, treeview_item_id: str | int):
+        tags = self.treeview.item(treeview_item_id, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        separator_id = tags[0]
+
+        if separator_id not in self.app_state.separators:
+            return
+
+        label = simpledialog.askstring("Renaming the current separator",
+                                       "Enter new name of the separator")
+        if label == None:
+            return
+        self.app_state.separators[separator_id].label = label
+        self.treeview.item(treeview_item_id, text=label) 
+
 
     def set_language(self):
         global language
