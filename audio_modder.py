@@ -2298,6 +2298,17 @@ class EventWindow:
 
 class MainWindow:
 
+    # Entry type constant / enum
+    entry_type_audio_source = "Audio Source"
+    entry_type_event = "Event"
+    entry_type_music_segment = "Music Segment"
+    entry_type_music_track = "Music Track"
+    entry_type_separator = "Separator"
+    entry_type_sound_bank = "Sound Bank"
+    entry_type_string = "String"
+    entry_type_text_bank = "Text Bank"
+    entry_type_unknown = "Unknown"
+
     dark_mode_bg = "#333333"
     dark_mode_fg = "#ffffff"
     dark_mode_modified_bg = "#ffffff"
@@ -2665,7 +2676,7 @@ class MainWindow:
                 values = self.treeview.item(select, option="values")
                 if isinstance(values, tuple):
                     assert(len(values) == 1)
-                if values[0] != "Audio Source":
+                if values[0] != self.entry_type_audio_source:
                     all_audio = False
                     break
 
@@ -2674,8 +2685,8 @@ class MainWindow:
                 assert(len(values) == 1)
 
             # Below condition check for creating separator is not great
-            is_separator = values[0] == cfg.Separator.entry_type
-            is_audio_source = values[0] == "Audio Source"
+            is_separator = values[0] == self.entry_type_separator 
+            is_audio_source = values[0] == self.entry_type_audio_source 
             allowed_separation = not is_separator and is_audio_source
             if allowed_separation:
                 tags = self.treeview.item(selects[-1], option="tags")
@@ -2744,7 +2755,7 @@ class MainWindow:
             values = self.treeview.item(select, option="values")
             tags = self.treeview.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if values[0] != "Audio Source":
+            if values[0] != self.entry_type_audio_source:
                 continue
             self.play_audio(int(tags[0]))
 
@@ -2776,7 +2787,7 @@ class MainWindow:
         self.treeview.insert(parent_item_id, idx,
                              text=label,
                              tags=separator_id, 
-                             values=(cfg.Separator.entry_type,))
+                             values=(self.entry_type_separator,))
         self.treeview.tag_configure(separator_id,
                                     background="#073642",
                                     foreground="#586e75")
@@ -2828,7 +2839,7 @@ class MainWindow:
             assert(len(values) == 1)
 
         selection_type = values[0]
-        if selection_type == cfg.Separator.entry_type:
+        if selection_type == self.entry_type_separator:
             return
 
         tags = self.treeview.item(select, option="tags")
@@ -2837,21 +2848,21 @@ class MainWindow:
         selection_id = int(tags[0])
         for child in self.entry_info_panel.winfo_children():
             child.forget()
-        if selection_type == "String":
+        if selection_type == self.entry_type_string:
             self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selection_id))
             self.string_info_panel.frame.pack()
-        elif selection_type == "Audio Source":
+        elif selection_type == self.entry_type_audio_source:
             self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selection_id))
             self.audio_info_panel.frame.pack()
-        elif selection_type == "Event":
+        elif selection_type == self.entry_type_event:
             self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selection_id))
             self.event_info_panel.frame.pack()
-        elif selection_type == "Music Segment":
+        elif selection_type == self.entry_type_music_segment:
             self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selection_id))
             self.segment_info_panel.frame.pack()
-        elif selection_type == "Sound Bank":
+        elif selection_type == self.entry_type_sound_bank:
             pass
-        elif selection_type == "Text Bank":
+        elif selection_type == self.entry_type_text_bank:
             pass
 
     def copy_id(self):
@@ -2881,30 +2892,39 @@ class MainWindow:
 
         separators = self.app_state.get_separators_by_entry_id(entry_id)
         for separator in separators:
-            self.treeview.insert(parentItem, END, tags=separator.id)
-
+            self.treeview.insert(parentItem, END,
+                                 text=separator.label,
+                                 tags=separator.id, 
+                                 values=(self.entry_type_separator,))
+            self.treeview.tag_configure(separator.id,
+                                        background="#073642",
+                                        foreground="#586e75")
         tree_entry = self.treeview.insert(parentItem, END, tags=str(entry_id))
         if isinstance(entry, WwiseBank):
             name = entry.dep.data.split('/')[-1]
-            entry_type = "Sound Bank"
+            entry_type = self.entry_type_sound_bank 
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
-            entry_type = "Text Bank"
+            entry_type = self.entry_type_text_bank 
         elif isinstance(entry, AudioSource):
             name = f"{entry.get_id()}.wem"
-            entry_type = "Audio Source"
+            entry_type = self.entry_type_audio_source
         elif isinstance(entry, TrackInfoStruct):
             name = f"Event {entry.get_id()}"
-            entry_type = "Event"
+            entry_type = self.entry_type_event 
         elif isinstance(entry, StringEntry):
-            entry_type = "String"
+            entry_type = self.entry_type_string
             name = entry.get_text()[:20]
         elif isinstance(entry, MusicTrack):
-            entry_type = "Music Track"
+            entry_type = self.entry_type_music_track
             name = f"Track {entry.get_id()}"
         elif isinstance(entry, MusicSegment):
-            entry_type = "Music Segment"
+            entry_type = self.entry_type_music_segment 
             name = f"Segment {entry.get_id()}"
+        else:
+            logger.error(f"Unknwon entry instance {type(entry)}")
+            name = ""
+            entry_type = self.entry_type_unknown
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -2964,7 +2984,7 @@ class MainWindow:
         self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
-        if self.treeview.item(item, option="values")[0] == "String":
+        if self.treeview.item(item, option="values")[0] == self.entry_type_string:
             string_entry = self.file_handler.get_string_by_id(int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
