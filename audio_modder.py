@@ -2097,10 +2097,11 @@ class FileHandler:
                 return
             conversion = root_spec["conversion"]
 
+        spec_dir = os.path.dirname(spec_path)
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
-            "Root": os.path.dirname(spec_path)
-            })
+            "Root": spec_dir
+        })
         wems: list[tuple[str, AudioSource]] = []
         for sub_spec in root_spec["specs"]:
             # Validate spec format #
@@ -2115,12 +2116,12 @@ class FileHandler:
                 logger.warning("The given spec file is missing field "
                                "`workspace`. Use the current directory of the "
                                "given spec file is in instead.")
-                workspace = os.path.dirname(spec_path)
+                workspace = spec_dir 
             else:
                 workspace = sub_spec["workspace"]
                 # Relative path
                 if not os.path.exists(workspace): 
-                    workspace = os.path.join(spec_path, workspace) 
+                    workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
                 askokcancel(message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current "
@@ -2230,7 +2231,7 @@ class FileHandler:
                 continue
             if not os.path.exists(out):
                 # Relative patch write #
-                out = os.path.join(spec_path, out)
+                out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
                     askokcancel(message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
@@ -2244,10 +2245,13 @@ class FileHandler:
                             "log.txt for detailed.")
             root = etree.Element("ExternalSourcesList", attrib={
                 "SchemaVersion": "1",
-                "Root": os.path.dirname(spec_path)
+                "Root": spec_dir 
             })
             wems.clear()
-        
+
+        out: str | None = None
+        if "write_patch_to" not in root_spec:
+            return
         out = root_spec["write_patch_to"]
         if not isinstance(out, str):
             askokcancel(message="field `write_patch_to` has an invalid data "
@@ -2257,7 +2261,7 @@ class FileHandler:
             return
         if not os.path.exists(out):
             # Relative path patch writing #
-            out = os.path.join(spec_path, out)
+            out = os.path.join(spec_dir, out)
             if not os.path.exists(out):
                 askokcancel(message=f"{out} does not exist. Write patch "
                             "operation cancelled.")
@@ -2324,6 +2328,7 @@ class FileHandler:
                            "cancelled.")
             return
 
+        spec_dir = os.path.dirname(spec_path)
         for sub_spec in root_spec["specs"]:
             if not isinstance(sub_spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
@@ -2336,12 +2341,12 @@ class FileHandler:
                 logger.warning("The given spec file is missing field "
                                "`workspace`. Use the current directory of the "
                                "given spec file is in instead.")
-                workspace = os.path.dirname(spec_path)
+                workspace = spec_dir
             else:
                 workspace = sub_spec["workspace"]
                 # Relative path
                 if not os.path.exists(workspace): 
-                    workspace = os.path.join(spec_path, workspace) 
+                    workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
                 askokcancel(message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current"
@@ -2452,7 +2457,7 @@ class FileHandler:
                 continue
             if not os.path.exists(out):
                 # Relative path
-                out = os.path.join(spec_path, out)
+                out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
                     askokcancel(message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
@@ -2463,6 +2468,9 @@ class FileHandler:
                 askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
 
+        out: str | None = None
+        if "write_patch_to" not in root_spec:
+            return
         out = root_spec["write_patch_to"]
         if not isinstance(out, str):
             askokcancel(message="field `write_patch_to` has an invalid data "
@@ -2472,7 +2480,7 @@ class FileHandler:
             return
         if not os.path.exists(out):
             # Relative path
-            out = os.path.join(spec_path, out)
+            out = os.path.join(spec_dir, out)
             if not os.path.exists(out):
                 askokcancel(message=f"{out} does not exist. Write patch "
                             "operation cancelled.")
