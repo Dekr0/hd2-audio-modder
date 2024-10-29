@@ -16,8 +16,8 @@ from itertools import takewhile
 from math import ceil
 from tkinter import *
 from tkinter import ttk
-from tkinter import filedialog
 from tkinter.messagebox import askokcancel
+from tkinter import simpledialog, filedialog
 from tkinter.filedialog import askopenfilename
 from typing import Any, Literal, Callable, Union
 
@@ -2962,6 +2962,17 @@ class ArchiveSearch(ttk.Entry):
 
 class MainWindow:
 
+    # Entry type constant / enum
+    entry_type_audio_source = "Audio Source"
+    entry_type_event = "Event"
+    entry_type_music_segment = "Music Segment"
+    entry_type_music_track = "Music Track"
+    entry_type_separator = "Separator"
+    entry_type_sound_bank = "Sound Bank"
+    entry_type_string = "String"
+    entry_type_text_bank = "Text Bank"
+    entry_type_unknown = "Unknown"
+
     dark_mode_bg = "#333333"
     dark_mode_fg = "#ffffff"
     dark_mode_modified_bg = "#ffffff"
@@ -3168,6 +3179,15 @@ class MainWindow:
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
 
         self.root.resizable(False, False)
+        open_last_recent_file = len(self.app_state.recent_files) > 0 and \
+                os.path.exists(self.app_state.recent_files[-1])
+        if open_last_recent_file:
+            self.root.after(
+                    100, 
+                    lambda: self.load_archive(
+                        archive_file=self.app_state.recent_files[-1]
+                        )
+                    )
         self.root.mainloop()
         
     def search_bar_on_enter_key(self, event):
@@ -3403,23 +3423,51 @@ class MainWindow:
             all_audio = True
             for select in selects:
                 values = self.treeview.item(select, option="values")
-                assert(len(values) == 1)
-                if values[0] != "Audio Source":
+                if isinstance(values, tuple):
+                    assert(len(values) == 1)
+                if values[0] != self.entry_type_audio_source:
                     all_audio = False
                     break
+
+            values = self.treeview.item(selects[0], option="values")
+            if isinstance(values, tuple):
+                assert(len(values) == 1)
+
+            # Below condition check for creating separator is not great
+            is_separator = values[0] == self.entry_type_separator 
+            is_audio_source = values[0] == self.entry_type_audio_source 
+            allowed_separation = not is_separator and is_audio_source
+            if allowed_separation:
+                tags = self.treeview.item(selects[-1], option="tags")
+                if isinstance(tags, tuple):
+                    assert(len(tags) == 1)
+                self.right_click_id = int(tags[0])
+                self.right_click_menu.add_command(
+                    label="Create a separator",
+                    command=lambda: self.create_separator(selects[0], 
+                                                          self.right_click_id)
+                )
+            if not all_audio:
+                if not is_single:
+                    return
+                if is_separator:
+                    self.right_click_menu.add_command(
+                            label="Delete separator",
+                            command=lambda: self.delete_separator(selects[0])
+                            )
+                    self.right_click_menu.add_command(
+                            label="Rename separator",
+                            command=lambda: self.rename_separator(selects[0])
+                            )
+                    self.right_click_menu.tk_popup(event.x_root, event.y_root)
+                    return
+                return
 
             self.right_click_menu.add_command(
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
 
-            if not all_audio:
-                return
-
-            tags = self.treeview.item(selects[-1], option="tags")
-            assert(len(tags) == 1)
-            self.right_click_id = int(tags[0])
-            
             self.right_click_menu.add_command(
                 label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
                 command=self.dump_as_wem
@@ -3460,7 +3508,7 @@ class MainWindow:
             values = self.treeview.item(select, option="values")
             tags = self.treeview.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if values[0] != "Audio Source":
+            if values[0] != self.entry_type_audio_source:
                 continue
             self.play_audio(int(tags[0]))
 
@@ -3476,6 +3524,54 @@ class MainWindow:
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
                 self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
+
+    def create_separator(self, 
+                         linked_entry_item_id: str | int, 
+                         linked_entry_id: int):
+        parent_item_id = self.treeview.parent(linked_entry_item_id)
+        idx = self.treeview.index(linked_entry_item_id)
+        label = simpledialog.askstring("Create new separator", 
+                                       "Enter name of the new separator")
+        if label == None:
+            return
+        separator_id = self.app_state.add_separator(label, linked_entry_id)
+        if separator_id == "":
+            return
+        self.treeview.insert(parent_item_id, idx,
+                             text=label,
+                             tags=separator_id, 
+                             values=(self.entry_type_separator,))
+        self.treeview.tag_configure(separator_id,
+                                    background="#073642",
+                                    foreground="#586e75")
+
+    def delete_separator(self, treeview_item_id: str | int):
+        tags = self.treeview.item(treeview_item_id, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        separator_id = tags[0]
+        self.treeview.delete(treeview_item_id)
+        self.app_state.remove_separator(separator_id)
+
+    def rename_separator(self, treeview_item_id: str | int):
+        tags = self.treeview.item(treeview_item_id, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        separator_id = tags[0]
+
+        if separator_id not in self.app_state.separators:
+            return
+
+        separator = self.app_state.separators[separator_id]
+
+        label = simpledialog.askstring("Renaming the current separator",
+                                       "Enter new name of the separator",
+                                       initialvalue=separator.label)
+        if label == None:
+            return
+        self.app_state.separators[separator_id].label = label
+        self.treeview.item(treeview_item_id, text=label) 
+
 
     def set_language(self):
         global language
@@ -3506,27 +3602,40 @@ class MainWindow:
             self.search_label['text'] = f"{self.search_result_index+1}/{len(self.search_results)}"
 
     def show_info_window(self, event=None):
-        if len(self.treeview.selection()) != 1:
+        selects = self.treeview.selection()
+        if len(selects) != 1:
             return
-        selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
-        selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
+
+        select = selects[0]
+        values = self.treeview.item(select, option="values")
+        if isinstance(values, tuple):
+            assert(len(values) == 1)
+
+        selection_type = values[0]
+        if selection_type == self.entry_type_separator:
+            return
+
+        tags = self.treeview.item(select, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        selection_id = int(tags[0])
         for child in self.entry_info_panel.winfo_children():
             child.forget()
-        if selection_type == "String":
+        if selection_type == self.entry_type_string:
             self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selection_id))
             self.string_info_panel.frame.pack()
-        elif selection_type == "Audio Source":
+        elif selection_type == self.entry_type_audio_source:
             self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selection_id))
             self.audio_info_panel.frame.pack()
-        elif selection_type == "Event":
+        elif selection_type == self.entry_type_event:
             self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selection_id))
             self.event_info_panel.frame.pack()
-        elif selection_type == "Music Segment":
+        elif selection_type == self.entry_type_music_segment:
             self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selection_id))
             self.segment_info_panel.frame.pack()
-        elif selection_type == "Sound Bank":
+        elif selection_type == self.entry_type_sound_bank:
             pass
-        elif selection_type == "Text Bank":
+        elif selection_type == self.entry_type_text_bank:
             pass
 
     def copy_id(self):
@@ -3552,28 +3661,43 @@ class MainWindow:
 
     def create_treeview_entry(self, entry, parentItem=""):
         if entry is None: return
-        tree_entry = self.treeview.insert(parentItem, END, tag=entry.get_id())
+        entry_id: int = entry.get_id()
+
+        separators = self.app_state.get_separators_by_entry_id(entry_id)
+        for separator in separators:
+            self.treeview.insert(parentItem, END,
+                                 text=separator.label,
+                                 tags=separator.id, 
+                                 values=(self.entry_type_separator,))
+            self.treeview.tag_configure(separator.id,
+                                        background="#073642",
+                                        foreground="#586e75")
+        tree_entry = self.treeview.insert(parentItem, END, tags=str(entry_id))
         if isinstance(entry, WwiseBank):
             name = entry.dep.data.split('/')[-1]
-            entry_type = "Sound Bank"
+            entry_type = self.entry_type_sound_bank 
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
-            entry_type = "Text Bank"
+            entry_type = self.entry_type_text_bank 
         elif isinstance(entry, AudioSource):
             name = f"{entry.get_id()}.wem"
-            entry_type = "Audio Source"
+            entry_type = self.entry_type_audio_source
         elif isinstance(entry, TrackInfoStruct):
             name = f"Event {entry.get_id()}"
-            entry_type = "Event"
+            entry_type = self.entry_type_event 
         elif isinstance(entry, StringEntry):
-            entry_type = "String"
+            entry_type = self.entry_type_string
             name = entry.get_text()[:20]
         elif isinstance(entry, MusicTrack):
-            entry_type = "Music Track"
+            entry_type = self.entry_type_music_track
             name = f"Track {entry.get_id()}"
         elif isinstance(entry, MusicSegment):
-            entry_type = "Music Segment"
+            entry_type = self.entry_type_music_segment 
             name = f"Segment {entry.get_id()}"
+        else:
+            logger.error(f"Unknwon entry instance {type(entry)}")
+            name = ""
+            entry_type = self.entry_type_unknown
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -3584,7 +3708,7 @@ class MainWindow:
         self.search_label['text'] = ""
         self.search_text_var.set("")
             
-    def create_hierarchy_view(self):
+    def create_hierarchy_view(self, is_load=False):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
@@ -3610,9 +3734,10 @@ class MainWindow:
                 e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
                     self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
-        self.check_modified()
+        if not is_load:
+            self.check_modified()
                 
-    def create_source_view(self):
+    def create_source_view(self, is_load=True):
         self.clear_search()
         existing_sources = set()
         self.treeview.delete(*self.treeview.get_children())
@@ -3630,10 +3755,11 @@ class MainWindow:
                 e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
                     self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
-        self.check_modified()
+        if not is_load:
+            self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
-        if self.treeview.item(item, option="values")[0] == "String":
+        if self.treeview.item(item, option="values")[0] == self.entry_type_string:
             string_entry = self.file_handler.get_string_by_id(int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
@@ -3696,9 +3822,9 @@ class MainWindow:
             self.update_language_menu()
             self.update_recent_files(filepath=self.file_handler.file_reader.path)
             if self.selected_view.get() == "SourceView":
-                self.create_source_view()
+                self.create_source_view(is_load=True)
             else:
-                self.create_hierarchy_view()
+                self.create_hierarchy_view(is_load=True)
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
         else:
@@ -3724,9 +3850,16 @@ class MainWindow:
     """
     def check_modified(self): 
         for child in self.treeview.get_children():
+            values = self.treeview.item(child, option="values")
+            if isinstance(values, tuple):
+                assert(len(values) == 1)
+            if values[0] == self.entry_type_separator:
+                continue
             self.clear_treeview_background(child)
+
         bg: Any
         fg: Any
+
         for audio in self.file_handler.get_audio().values():
             is_modified = audio.modified or audio.get_track_info() is not None \
                     and audio.get_track_info().modified
