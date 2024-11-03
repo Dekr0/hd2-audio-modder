@@ -2,17 +2,40 @@ import os
 import pickle
 import tkinter.messagebox as message_box
 import tkinter.filedialog as file_dialog
+import uuid
 
 from log import logger
+
+class Separator:
+
+    def __init__(self, id: str, label: str, linked_entry_id: int):
+        self.id = id
+        self.label = label
+        self.linked_entry_id = linked_entry_id 
+
+class LabelEntry:
+
+    def __init__(self, label: str, linked_entry_id: int):
+        self.label = label
+        self.linked_entry_id = linked_entry_id
 
 class Config:
 
     def __init__(self,
                  game_data_path: str,
+                 label_entry: dict[int, LabelEntry] = {},
+                 separators: dict[str, Separator] = {},
+                 separated_entries: dict[int, list[str]] = {},
                  recent_files: list[str] = [],
                  theme: str = "dark_mode",
                  workspace_paths: set[str] = set()):
         self.game_data_path = game_data_path
+
+        # New
+        self.label_entry = label_entry
+        self.separators = separators
+        self.separated_entries = separated_entries
+
         self.recent_files = recent_files
         self.theme = theme
         self.workspace_paths = workspace_paths
@@ -43,6 +66,39 @@ class Config:
                                     if os.path.exists(p)])
         return self.workspace_paths
 
+    def add_separator(self, label: str, linked_entry_id: int) -> str:
+        id = uuid.uuid4().hex
+        if id in self.separators:
+            logger.error("Hash collision when creating a new separator!")
+            return ""
+        separator = Separator(id, label, linked_entry_id)
+        self.separators[id] = separator
+        if linked_entry_id not in self.separated_entries:
+            self.separated_entries[linked_entry_id] = [separator.id]
+        else:
+            self.separated_entries[linked_entry_id].append(separator.id)
+        return separator.id
+
+    def remove_separator(self, id: str):
+        if id not in self.separators:
+            return
+        linked_entry_id = self.separators.pop(id).linked_entry_id
+        if linked_entry_id not in self.separated_entries:
+            return
+        self.separated_entries[linked_entry_id].remove(id)
+
+    def get_separators_by_entry_id(self, entry_id: int) -> list[Separator]:
+        if entry_id not in self.separated_entries:
+            return []
+        separators: list[Separator] = []
+        for separator_id in self.separated_entries[entry_id]:
+            if separator_id not in self.separators:
+                logger.error(f"Separator {separator_id} does not exist")
+                continue
+            separators.append(self.separators[separator_id])
+        return separators
+
+
 def load_config(config_path: str = "config.pickle") -> Config | None:
     if os.path.exists(config_path):
         cfg: Config | None = None
@@ -67,6 +123,7 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             cfg.game_data_path = game_data_path
             cfg.workspace_paths = set([p for p in cfg.workspace_paths 
                                    if os.path.exists(p)])
+
         # For backwards compatibility with configuration created before these 
         # were added
         try: 
@@ -77,6 +134,20 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             _ = cfg.recent_files
         except:
             cfg.recent_files = []
+        try: 
+            _ = cfg.separators
+        except:
+            cfg.separators = {}
+        try:
+            _ = cfg.separated_entries
+        except:
+            cfg.separated_entries = {}
+        try:
+            _ = cfg.label_entry
+        except:
+            cfg.label_entry = {}
+        # Backwards compatibility check End
+
         cfg.recent_files = [file for file in cfg.recent_files if os.path.exists(file)]
         cfg.save_config()
         return cfg
