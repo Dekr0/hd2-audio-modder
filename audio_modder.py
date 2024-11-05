@@ -17,8 +17,7 @@ from itertools import takewhile
 from math import ceil
 from tkinter import *
 from tkinter import ttk
-from tkinter import filedialog
-from tkinter.messagebox import askokcancel
+from tkinter import filedialog, simpledialog
 from tkinter.messagebox import showwarning
 from tkinter.messagebox import showerror
 from tkinter.filedialog import askopenfilename
@@ -1920,8 +1919,8 @@ class FileHandler:
             return False
         return True
 
-    def load_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None): 
-        if wems == None:
+    def load_wems(self, wems: Union[tuple[str, ...], Literal[""]] = ""): 
+        if wems == "":
             wems = filedialog.askopenfilenames(title="Choose .wem files to import")
         if wems == "":
             return
@@ -1949,7 +1948,7 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
         
-    def create_external_sources_list(self, sources: list[str]):
+    def create_external_sources_list(self, sources: tuple[str, ...]):
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": __file__
@@ -1965,9 +1964,8 @@ class FileHandler:
         
         return os.path.join(CACHE, "external_sources.wsources")
         
-        
-    def load_wavs(self, wavs: list[str] | None = None):
-        if wavs == None:
+    def load_wavs(self, wavs: Union[tuple[str, ...], Literal['']] = ''):
+        if wavs == '':
             wavs = filedialog.askopenfilenames(title="Choose .wem files to import")
         if wavs == "":
             return
@@ -2007,7 +2005,7 @@ class FileHandler:
             logger.error(e)
             showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
             
-        wems = [os.path.join(convert_dest, x) for x in os.listdir(convert_dest)]
+        wems = tuple(os.path.join(convert_dest, x) for x in os.listdir(convert_dest))
         
         self.load_wems(wems)
         
@@ -3171,6 +3169,17 @@ class ArchiveSearch(ttk.Entry):
 
 class MainWindow:
 
+    # Entry type constant / enum
+    entry_type_audio_source = "Audio Source"
+    entry_type_event = "Event"
+    entry_type_music_segment = "Music Segment"
+    entry_type_music_track = "Music Track"
+    entry_type_separator = "Separator"
+    entry_type_sound_bank = "Sound Bank"
+    entry_type_string = "String"
+    entry_type_text_bank = "Text Bank"
+    entry_type_unknown = "Unknown"
+
     dark_mode_bg = "#333333"
     dark_mode_fg = "#ffffff"
     dark_mode_modified_bg = "#ffffff"
@@ -3404,14 +3413,17 @@ class MainWindow:
         theme = self.selected_theme.get()
         if theme == "dark_mode":
             if modified:
-                return (MainWindow.dark_mode_modified_bg, MainWindow.dark_mode_modified_fg)
+                return (MainWindow.dark_mode_modified_bg, 
+                        MainWindow.dark_mode_modified_fg)
             else:
                 return (MainWindow.dark_mode_bg, MainWindow.dark_mode_fg)
         elif theme == "light_mode":
             if modified:
-                return (MainWindow.light_mode_modified_bg, MainWindow.light_mode_modified_fg)
+                return (MainWindow.light_mode_modified_bg, 
+                        MainWindow.light_mode_modified_fg)
             else:
                 return (MainWindow.light_mode_bg, MainWindow.light_mode_fg)
+        assert(False)
 
     def render_workspace(self):
         """
@@ -3619,17 +3631,44 @@ class MainWindow:
             for select in selects:
                 values = self.treeview.item(select, option="values")
                 assert(len(values) == 1)
-                if values[0] != "Audio Source":
+                if values[0] != self.entry_type_audio_source:
                     all_audio = False
                     break
+
+            values = self.treeview.item(selects[0], option="values")
+            assert(len(values) == 1)
+
+            is_separator = values[0] == self.entry_type_separator
+            is_audio_source = values[0] == self.entry_type_audio_source
+            allowed_separation = not is_separator and is_audio_source
+            if allowed_separation:
+                tags = self.treeview.item(selects[-1], option="tags")
+                assert(len(tags) == 1)
+                self.right_click_id = int(tags[0])
+                self.right_click_menu.add_command(
+                    label="Create a separator",
+                    command=lambda: self.create_separator(selects[0], 
+                                                          self.right_click_id)
+                )
+            
+            is_single_separator = not all_audio and is_single and is_separator
+            if is_single_separator:
+                self.right_click_menu.add_command(
+                        label="Delete separator",
+                        command=lambda: self.delete_separator(selects[0])
+                        )
+                self.right_click_menu.add_command(
+                        label="Rename separator",
+                        command=lambda: self.rename_separator(selects[0])
+                        )
+                self.right_click_menu.tk_popup(event.x_root, event.y_root)
+
+                return
 
             self.right_click_menu.add_command(
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
-
-            if not all_audio:
-                return
 
             tags = self.treeview.item(selects[-1], option="tags")
             assert(len(tags) == 1)
@@ -3675,7 +3714,7 @@ class MainWindow:
             values = self.treeview.item(select, option="values")
             tags = self.treeview.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if values[0] != "Audio Source":
+            if values[0] != self.entry_type_audio_source:
                 continue
             self.play_audio(int(tags[0]))
 
@@ -3691,6 +3730,53 @@ class MainWindow:
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
                 self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
+
+    def create_separator(self, 
+                         linked_entry_item_id: str | int, 
+                         linked_entry_id: int):
+        parent_item_id = self.treeview.parent(linked_entry_item_id)
+        idx = self.treeview.index(linked_entry_item_id)
+        label = simpledialog.askstring("Create new separator", 
+                                       "Enter name of the new separator")
+        if label == None:
+            return
+        separator_id = self.app_state.add_separator(label, linked_entry_id)
+        if separator_id == "":
+            return
+        self.treeview.insert(parent_item_id, idx,
+                             text=label,
+                             tags=separator_id, 
+                             values=(self.entry_type_separator,))
+        self.treeview.tag_configure(separator_id,
+                                    background="#073642",
+                                    foreground="#586e75")
+
+    def delete_separator(self, treeview_item_id: str | int):
+        tags = self.treeview.item(treeview_item_id, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        separator_id = tags[0]
+        self.treeview.delete(treeview_item_id)
+        self.app_state.remove_separator(separator_id)
+
+    def rename_separator(self, treeview_item_id: str | int):
+        tags = self.treeview.item(treeview_item_id, option="tags")
+        if isinstance(tags, tuple):
+            assert(len(tags) == 1)
+        separator_id = tags[0]
+
+        if separator_id not in self.app_state.separators:
+            return
+
+        separator = self.app_state.separators[separator_id]
+
+        label = simpledialog.askstring("Renaming the current separator",
+                                       "Enter new name of the separator",
+                                       initialvalue=separator.label)
+        if label == None:
+            return
+        self.app_state.separators[separator_id].label = label
+        self.treeview.item(treeview_item_id, text=label) 
 
     def set_language(self):
         global language
@@ -3723,25 +3809,42 @@ class MainWindow:
     def show_info_window(self, event=None):
         if len(self.treeview.selection()) != 1:
             return
-        selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
-        selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
+
+        selects = self.treeview.selection()
+        if len(selects) <= 0:
+            return
+
+        values = self.treeview.item(selects[0], option="values")
+        assert(len(values) >= 1)
+        selected_type = values[0]
+        if selected_type == self.entry_type_separator:
+            return
+
+        tags = self.treeview.item(selects[0], option="tags")
+        assert(len(tags) >= 1)
+        selected_id = int(tags[0])
+
         for child in self.entry_info_panel.winfo_children():
             child.forget()
-        if selection_type == "String":
-            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selection_id))
+        if selected_type == self.entry_type_string:
+            self.string_info_panel.set_string_entry(
+                    self.file_handler.get_string_by_id(selected_id))
             self.string_info_panel.frame.pack()
-        elif selection_type == "Audio Source":
-            self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selection_id))
+        elif selected_type == self.entry_type_audio_source:
+            self.audio_info_panel.set_audio(
+                    self.file_handler.get_audio_by_id(selected_id))
             self.audio_info_panel.frame.pack()
-        elif selection_type == "Event":
-            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selection_id))
+        elif selected_type == self.entry_type_event:
+            self.event_info_panel.set_track_info(
+                    self.file_handler.get_event_by_id(selected_id))
             self.event_info_panel.frame.pack()
-        elif selection_type == "Music Segment":
-            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selection_id))
+        elif selected_type == self.entry_type_music_segment:
+            self.segment_info_panel.set_segment_info(
+                    self.file_handler.get_music_segment_by_id(selected_id))
             self.segment_info_panel.frame.pack()
-        elif selection_type == "Sound Bank":
+        elif selected_type == self.entry_type_sound_bank:
             pass
-        elif selection_type == "Text Bank":
+        elif selected_type == self.entry_type_text_bank:
             pass
 
     def copy_id(self):
@@ -3767,30 +3870,50 @@ class MainWindow:
 
     def create_treeview_entry(self, entry, parentItem=""):
         if entry is None: return
-        tree_entry = self.treeview.insert(parentItem, END, tag=entry.get_id())
+
+        entry_id: int = entry.get_id()
+
+        separators = self.app_state.get_separators_by_entry_id(entry_id)
+        for separator in separators:
+            self.treeview.insert(parentItem, END,
+                                 text=separator.label,
+                                 tags=separator.id, 
+                                 values=(self.entry_type_separator,))
+            self.treeview.tag_configure(separator.id,
+                                        background="#073642",
+                                        foreground="#586e75")
+
+        tree_entry = self.treeview.insert(parentItem, END, tags=str(entry_id))
+
         if isinstance(entry, WwiseBank):
             name = entry.dep.data.split('/')[-1]
-            entry_type = "Sound Bank"
+            entry_type = self.entry_type_sound_bank 
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
-            entry_type = "Text Bank"
+            entry_type = self.entry_type_text_bank 
         elif isinstance(entry, AudioSource):
             name = f"{entry.get_id()}.wem"
-            entry_type = "Audio Source"
+            entry_type = self.entry_type_audio_source
         elif isinstance(entry, TrackInfoStruct):
             name = f"Event {entry.get_id()}"
-            entry_type = "Event"
+            entry_type = self.entry_type_event
         elif isinstance(entry, StringEntry):
-            entry_type = "String"
+            entry_type = self.entry_type_string
             name = entry.get_text()[:20]
         elif isinstance(entry, MusicTrack):
-            entry_type = "Music Track"
+            entry_type = self.entry_type_music_track 
             name = f"Track {entry.get_id()}"
         elif isinstance(entry, MusicSegment):
-            entry_type = "Music Segment"
+            entry_type = self.entry_type_music_segment
             name = f"Segment {entry.get_id()}"
+        else:
+            logger.error(f"Unknown entry instance {type(entry)}")
+            name = ""
+            entry_type = self.entry_type_unknown
+
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
+
         return tree_entry
         
     def clear_search(self):
@@ -3798,33 +3921,55 @@ class MainWindow:
         self.search_results.clear()
         self.search_label['text'] = ""
         self.search_text_var.set("")
-            
+
     def create_hierarchy_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
         for bank in bank_dict.values():
             bank_entry = self.create_treeview_entry(bank)
+            assert(bank_entry != None)
+
             for hierarchy_entry in bank.hierarchy.entries.values():
                 if isinstance(hierarchy_entry, MusicSegment):
-                    segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
+                    segment_entry = self.create_treeview_entry(hierarchy_entry, 
+                                                               bank_entry)
+                    assert(segment_entry != None)
+
                     for track_id in hierarchy_entry.tracks:
                         track = bank.hierarchy.entries[track_id]
-                        track_entry = self.create_treeview_entry(track, segment_entry)
+                        track_entry = self.create_treeview_entry(track, 
+                                                                 segment_entry)
+                        assert(track_entry != None)
+
                         for source in track.sources:
-                            if source.plugin_id == VORBIS:
-                                self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), track_entry)
+                            if source.plugin_id != VORBIS:
+                                continue
+                            self.create_treeview_entry(
+                                    self.file_handler.get_audio_by_id(
+                                        source.source_id
+                                    ), 
+                                    track_entry)
                         for info in track.track_info:
-                            if info.event_id != 0:
-                                self.create_treeview_entry(info, track_entry)
+                            if info.event_id == 0:
+                                continue
+                            self.create_treeview_entry(info, track_entry)
                 elif isinstance(hierarchy_entry, Sound):
-                    if hierarchy_entry.sources[0].plugin_id == VORBIS:
-                        self.create_treeview_entry(self.file_handler.get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
+                    source = hierarchy_entry.sources[0]
+                    if source.plugin_id == VORBIS:
+                        self.create_treeview_entry(
+                                self.file_handler.get_audio_by_id(source.source_id), 
+                                bank_entry
+                                )
         for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+            if entry.language != language:
+                continue
+            e = self.create_treeview_entry(entry)
+            assert(e != None)
+            for string_id in entry.string_ids:
+                self.create_treeview_entry(
+                        self.file_handler.file_reader.string_entries[language][string_id], 
+                        e)
         self.check_modified()
                 
     def create_source_view(self):
@@ -3835,30 +3980,49 @@ class MainWindow:
         for bank in bank_dict.values():
             existing_sources.clear()
             bank_entry = self.create_treeview_entry(bank)
+
+            assert(bank_entry != None)
+
             for hierarchy_entry in bank.hierarchy.entries.values():
                 for source in hierarchy_entry.sources:
-                    if source.plugin_id == VORBIS and source.source_id not in existing_sources:
-                        existing_sources.add(source.source_id)
-                        self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), bank_entry)
+                    is_audio = source.plugin_id == VORBIS
+                    is_dup = source.source_id in existing_sources
+                    if not is_audio or is_dup:
+                        continue
+
+                    existing_sources.add(source.source_id)
+                    self.create_treeview_entry(
+                            self.file_handler.get_audio_by_id(source.source_id), 
+                            bank_entry)
         for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+            if entry.language != language:
+                continue
+
+            e = self.create_treeview_entry(entry)
+            assert(e != None)
+
+            for string_id in entry.string_ids:
+                self.create_treeview_entry(
+                        self.file_handler.file_reader.string_entries[language][string_id], 
+                        e)
         self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
-        if self.treeview.item(item, option="values")[0] == "String":
-            string_entry = self.file_handler.get_string_by_id(int(self.treeview.item(item, option="tags")[0]))
+        if self.treeview.item(item, option="values")[0] == \
+                self.entry_type_string:
+            string_entry = self.file_handler.get_string_by_id(
+                    int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
             s = self.treeview.item(item, option="text")
             match = s.startswith(search_text_var) or s.endswith(search_text_var)
         children = self.treeview.get_children(item)
-        if match: self.search_results.append(item)
-        if len(children) > 0:
-            for child in children:
-                self.recursive_match(search_text_var, child)
+        if match:
+            self.search_results.append(item)
+        if len(children) <= 0:
+            return
+        for child in children:
+            self.recursive_match(search_text_var, child)
 
     def search(self):
         self.search_results.clear()
@@ -3926,6 +4090,12 @@ class MainWindow:
 
     def clear_treeview_background(self, item):
         bg_color, fg_color = self.get_colors()
+
+        values = self.treeview.item(item, option="values")
+        assert(len(values) >= 1)
+        if values[0] == self.entry_type_separator:
+            return
+        
         self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
                                     background=bg_color,
                                     foreground=fg_color)
@@ -4066,8 +4236,9 @@ if __name__ == "__main__":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
         FFMPEG = "ffmpeg"
         WWISE_CLI = ""
-        showwarning(title="Unsupported", message="Wwise integration is not " \
-            "supported for Linux. WAV file import is disabled")
+        showwarning(title="Unsupported", 
+                    message="Wwise integration is not "
+                    "supported for Linux. WAV file import is disabled")
     elif SYSTEM == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
@@ -4078,21 +4249,25 @@ if __name__ == "__main__":
             pass
         
     if not os.path.exists(VGMSTREAM):
-        logger.error("Cannot find vgmstream distribution! " \
-                     f"Ensure the {os.path.dirname(VGMSTREAM)} folder is " \
+        logger.error("Cannot find vgmstream distribution! "
+                     f"Ensure the {os.path.dirname(VGMSTREAM)} folder is "
                      "in the same folder as the executable")
-        showwarning(title="Missing Plugin", message="Cannot find vgmstream distribution! " \
+        showwarning(title="Missing Plugin", 
+                    message="Cannot find vgmstream distribution! "
                     "Audio playback is disabled.")
                      
     if not os.path.exists(WWISE_CLI) and SYSTEM != "Linux":
         logger.warning("Wwise installation not found. WAV file import is disabled.")
-        showwarning(title="Missing Plugin", message="Wwise installation not found. WAV file import is disabled.")
+        showwarning(title="Missing Plugin", 
+                    message="Wwise installation not found. " 
+                    "WAV file import is disabled.")
 
     lookup_store: db.LookupStore | None = None
     
     if not os.path.exists(GAME_FILE_LOCATION):
-        showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
-            " Audio archive search is disabled.")
+        showwarning(title="Missing Game Data", 
+                    message="No folder selected for Helldivers data folder." 
+                    " Audio archive search is disabled.")
     elif os.path.exists("hd_audio_db.db"):
         sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
         try:
