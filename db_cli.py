@@ -1,18 +1,18 @@
 import os
-import platform
+import uuid
 
 import config as cfg
 import db
 from log import logger
 from audio_modder import FileHandler, AudioSource
-from audio_modder import VGMSTREAM, VORBIS
+from audio_modder import VORBIS
 
 def generate_audio_source_table(
         app_state: cfg.Config,
         lookup_store: db.LookupStore,
         file_handler: FileHandler,
         ):
-    audio_sources: dict[int, db.HelldiverAudioSource] = {}
+    audio_sources: dict[int, db.OldHelldiverAudioSource] = {}
     loaded_audio_archives: set[str] = set()
     loaded_audio_archive_name_ids: set[str] = set()
     audio_archives = lookup_store.query_helldiver_audio_archive()
@@ -45,7 +45,7 @@ def generate_audio_source_table(
                         continue
                     audio_id: int = audio.get_id()
                     if audio_id not in audio_sources:
-                        audio_sources[audio_id] = db.HelldiverAudioSource(
+                        audio_sources[audio_id] = db.OldHelldiverAudioSource(
                                 audio_id, set([audio_archive_id]), set([audio_archive_name_id]))
                     else:
                         audio_sources[audio_id].linked_audio_archive_ids.add(
@@ -55,28 +55,40 @@ def generate_audio_source_table(
     sources = [value for _, value in audio_sources.items()]
     lookup_store.write_helldiver_audio_source_bulk(sources)
 
+def generate_audio_bank_table(
+        app_state: cfg.Config,
+        lookup_store: db.LookupStore,
+        file_handler: FileHandler
+    ):
+    game_archives = lookup_store.query_helldiver_game_archive()
+    viewed_banks: dict[int, db.HelldiverAudioBank] = {}
+    for game_archive in game_archives:
+        archive_file = os.path.join(app_state.game_data_path, 
+                                    game_archive.game_archive_id)
+        if not os.path.exists(archive_file):
+            continue
+        file_handler.load_archive_file(archive_file=archive_file)
+        banks = file_handler.get_wwise_banks()
+        for bank in banks.values():
+            bank_id: int = bank.get_id()
+            bank_name = bank.dep.data 
+            if bank_id not in viewed_banks:
+                viewed_banks[bank_id] = db.HelldiverAudioBank(
+                    uuid.uuid4().hex,
+                    bank_id,
+                    bank_name,
+                    "",
+                    set(),
+                )
+            if game_archive.id not in viewed_banks[bank_id].linked_game_archives:
+                viewed_banks[bank_id].linked_game_archives.add(game_archive.id)
+
+
 if __name__ == "__main__":
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
-    GAME_FILE_LOCATION = app_state.game_data_path
-
-    system = platform.system()
-    if system == "Windows":
-        VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
-        FFMPEG = "ffmpeg.exe"
-    elif system == "Linux":
-        VGMSTREAM = "vgmstream-linux/vgmstream-cli"
-        FFMPEG = "ffmpeg"
-    elif system == "Darwin":
-        VGMSTREAM = "vgmstream-macos/vgmstream-cli"
-        FFMPEG = "ffmpeg"
         
-    if not os.path.exists(VGMSTREAM):
-        logger.error(f"Cannot find vgmstream distribution! Ensure the \
-                {os.path.dirname(VGMSTREAM)} folder is in the same folder \
-                as the executable")
-
     lookup_store: db.LookupStore | None = None
     if os.path.exists("hd_audio_db.db"):
         sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
@@ -93,4 +105,5 @@ if __name__ == "__main__":
         exit(1)
 
     file_handler = FileHandler()
-    generate_audio_source_table(app_state, lookup_store, file_handler)
+    generate_audio_bank_table(app_state, lookup_store, file_handler)
+    # generate_audio_source_table(app_state, lookup_store, file_handler)

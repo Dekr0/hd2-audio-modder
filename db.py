@@ -16,13 +16,60 @@ def config_sqlite_conn(db_path: str):
 
     return _get_sqlite_conn
 
-class HelldiverAudioArchiveName:
+# Redesign
+class HelldiverGameArchive:
 
     def __init__(self,
-                 audio_archive_name_id: str,
-                 audio_archive_name: str):
-        self.audio_archive_name_id = audio_archive_name_id
-        self.audio_archive_name = audio_archive_name
+                 id: str,
+                 game_archive_id: str,
+                 categories: set[str]
+                 ):
+        self.id = id
+        self.game_archive_id = game_archive_id
+        self.categories = categories
+
+        def __str__(self):
+            return f"ID {self.id}; Game archive id: {self.game_archive_id}"
+
+class HelldiverAudioBank:
+
+    def __init__(self,
+                 id: str,
+                 audio_bank_id: int,
+                 audio_bank_name: str,
+                 audio_bank_readable_name: str,
+                 category: str,
+                 linked_game_archives: set[str]
+                 ):
+        self.id = id
+        self.audio_bank_id = audio_bank_id
+        self.audio_bank_name = audio_bank_name
+        self.audio_bank_readable_name = audio_bank_readable_name
+        self.category = category
+        self.linked_game_archives = linked_game_archives
+
+    def __str__(self):
+        return f"Audio bank id: {self.audio_bank_id}; Audio bank name: " + \
+               f"{self.audio_bank_name}"
+
+class HelldiverAudioSource:
+
+    def __init__(self,
+                 id: str,
+                 audio_source_id: int,
+                 label: str,
+                 tags: list[str],
+                 linked_audio_bank_id: list[str]
+                 ):
+        self.id = id
+        self.audio_source_id = audio_source_id
+        self.label = label
+        self.tags = tags
+        self.linked_audio_bank_id = linked_audio_bank_id
+
+    def __str__(self):
+        return f"Audio Source id: {self.audio_source_id};"
+# End
 
 class HelldiverAudioArchive:
 
@@ -34,7 +81,15 @@ class HelldiverAudioArchive:
         self.audio_archive_name_id = audio_archive_name_id
         self.audio_archive_name = audio_archive_name
 
-class HelldiverAudioSource:
+class HelldiverAudioArchiveName:
+
+    def __init__(self,
+                 audio_archive_name_id: str,
+                 audio_archive_name: str):
+        self.audio_archive_name_id = audio_archive_name_id
+        self.audio_archive_name = audio_archive_name
+
+class OldHelldiverAudioSource:
 
     def __init__(self,
                  audio_source_id: int,
@@ -53,6 +108,10 @@ class LookupStore:
     def query_helldiver_four_vo(self, query: str) -> dict[str, str]:
         return {} 
 
+    def query_helldiver_game_archive(self, category: str = "") -> \
+            list[HelldiverGameArchive]:
+        return []
+
     def query_helldiver_audio_archive(self, category: str = "") -> \
             list[HelldiverAudioArchive]:
         return []
@@ -61,7 +120,7 @@ class LookupStore:
         return []
 
     def write_helldiver_audio_source_bulk(self,
-                                          sources: list[HelldiverAudioSource]):
+                                          sources: list[OldHelldiverAudioSource]):
         pass
 
 class SQLiteLookupStore (LookupStore):
@@ -75,6 +134,33 @@ class SQLiteLookupStore (LookupStore):
         else:
             logger.warning("Builtin audio source lookup is disabled due to \
                     database connection error")
+
+    def query_helldiver_game_archive(self, category: str = "") -> \
+            list[HelldiverGameArchive]:
+        rows: sqlite3.Cursor
+        archives: list[HelldiverGameArchive] = []
+
+        try:
+            if category == "":
+                rows = self.cursor.execute("SELECT * FROM helldiver_game_archive")
+            else:
+                args = (category,)
+                rows = self.cursor.execute("SELECT * FROM helldiver_game_archive"
+                                           " WHERE audio_archive_category LIKE ?"
+                                           , args)
+            archives = [
+                    HelldiverGameArchive(
+                        row[0],
+                        row[1],
+                        set(row[2].split(","))
+                    ) 
+                    for row in rows
+                    ]
+        except (sqlite3.OperationalError, sqlite3.IntegrityError) as err:
+            self.logger.critical(err, stack_info=True)
+            archives = []
+
+        return archives
     
     def query_helldiver_audio_archive(self, category: str = "") -> \
             list[HelldiverAudioArchive]:
@@ -132,7 +218,7 @@ class SQLiteLookupStore (LookupStore):
 #        return {row[0]: row[1] for row in rows} 
 
     def write_helldiver_audio_source_bulk(self,
-                                          sources: list[HelldiverAudioSource]):
+                                          sources: list[OldHelldiverAudioSource]):
         if self.conn == None or self.cursor == None:
             return
         try:
