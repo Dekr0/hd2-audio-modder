@@ -148,7 +148,7 @@ class MemoryStream:
         self.location += length
 
     def read_format(self, format, size):
-        format = self.endian+format
+        format = self.endian + format
         return struct.unpack(format, self.read(size))[0]
         
     def bytes(self, value, size = -1):
@@ -164,29 +164,45 @@ class MemoryStream:
             return bytearray(value)
         return value
         
-    def int8_read(self):
-        return self.read_format('b', 1)
+    def int8_read(self) -> int:
+        r = self.read_format('b', 1)
+        assert(isinstance(r, int))
+        return r 
 
-    def uint8_read(self):
-        return self.read_format('B', 1)
+    def uint8_read(self) -> int:
+        r = self.read_format('B', 1)
+        assert(isinstance(r, int))
+        return r 
 
-    def int16_read(self):
-        return self.read_format('h', 2)
+    def int16_read(self) -> int:
+        r = self.read_format('h', 2)
+        assert(isinstance(r, int))
+        return r 
 
-    def uint16_read(self):
-        return self.read_format('H', 2)
+    def uint16_read(self) -> int:
+        r = self.read_format('H', 2)
+        assert(isinstance(r, int))
+        return r 
 
-    def int32_read(self):
-        return self.read_format('i', 4)
+    def int32_read(self) -> int:
+        r = self.read_format('i', 4)
+        assert(isinstance(r, int))
+        return r 
 
-    def uint32_read(self):
-        return self.read_format('I', 4)
+    def uint32_read(self) -> int:
+        r = self.read_format('I', 4)
+        assert(isinstance(r, int))
+        return r 
 
-    def int64_read(self):
-        return self.read_format('q', 8)
+    def int64_read(self) -> int:
+        r = self.read_format('q', 8)
+        assert(isinstance(r, int))
+        return r 
 
-    def uint64_read(self):
-        return self.read_format('Q', 8)
+    def uint64_read(self) -> int:
+        r = self.read_format('Q', 8)
+        assert(isinstance(r, int))
+        return r 
         
 def pad_to_16_byte_align(data):
     b = bytearray(data)
@@ -266,11 +282,17 @@ class Subscriber:
         
 class AudioSource:
 
+    """
+    bytes      data: Binary data of an audio source
+    int        size: Size of the binary data of an audio source
+    int resource_id: Same value as the file ID of a given game resource specified
+                     by ToCHeader
+    """
     def __init__(self):
-        self.data = b""
-        self.size = 0
-        self.resource_id = 0
-        self.short_id = 0
+        self.data: bytes = b""
+        self.size: int = 0
+        self.resource_id: int = 0
+        self.short_id: int = 0
         self.modified = False
         self.data_OLD = b""
         self.subscribers = set()
@@ -337,25 +359,31 @@ class AudioSource:
                     item.lower_modified()
                     item.update(self)
                 
-class TocHeader:
+class ToCHeader:
 
     def __init__(self):
         pass
         
-    def from_memory_stream(self, stream):
-        self.file_id             = stream.uint64_read()
-        self.type_id             = stream.uint64_read()
-        self.toc_data_offset     = stream.uint64_read()
-        self.stream_file_offset  = stream.uint64_read()
-        self.gpu_resource_offset = stream.uint64_read()
-        self.unknown1            = stream.uint64_read() #seems to contain duplicate entry index
-        self.unknown2            = stream.uint64_read()
-        self.toc_data_size       = stream.uint32_read()
-        self.stream_size         = stream.uint32_read()
-        self.gpu_resource_size   = stream.uint32_read()
-        self.unknown3            = stream.uint32_read()
-        self.unknown4            = stream.uint32_read()
-        self.entry_index         = stream.uint32_read()
+    """
+    uint64 file_id: ?
+    uint64 type_id: The type of resource?
+
+    What does ToC data include?
+    """
+    def from_memory_stream(self, stream: MemoryStream):
+        self.file_id: int              = stream.uint64_read()
+        self.type_id: int              = stream.uint64_read()
+        self.toc_data_offset: int      = stream.uint64_read()
+        self.stream_file_offset: int   = stream.uint64_read()
+        self.gpu_resource_offset: int  = stream.uint64_read()
+        self.unknown1: int             = stream.uint64_read() #seems to contain duplicate entry index
+        self.unknown2: int             = stream.uint64_read()
+        self.toc_data_size: int        = stream.uint32_read()
+        self.stream_size: int          = stream.uint32_read()
+        self.gpu_resource_size: int    = stream.uint32_read()
+        self.unknown3: int             = stream.uint32_read()
+        self.unknown4: int             = stream.uint32_read()
+        self.entry_index: int          = stream.uint32_read()
         
     def get_data(self):
         return (struct.pack("<QQQQQQQIIIIII",
@@ -372,6 +400,23 @@ class TocHeader:
             self.unknown3,
             self.unknown4,
             self.entry_index))
+
+    def __str__(self):
+        s = f"file_id: {self.file_id}\n"
+        f"type_id: {self.type_id}\n"
+        f"toc_data_offset: {self.toc_data_offset}\n"
+        f"stream_file_offset: {self.stream_file_offset}\n"
+        f"gpu_resource_offset: {self.gpu_resource_offset}\n"
+        f"unknown1: {self.unknown1}\n"
+        f"unknown2: {self.unknown2}\n"
+        f"toc_data_size: {self.toc_data_size}\n"
+        f"stream_size: {self.stream_size}\n"
+        f"gpu_resource_size: {self.gpu_resource_size}\n"
+        f"unknown3: {self.unknown3}\n"
+        f"unknown4: {self.unknown4}\n"
+        f"entry_index: {self.entry_index}"
+
+        return s
                 
 class WwiseDep:
 
@@ -546,16 +591,43 @@ class MusicSegment(HircEntry):
         )
         
 class HircEntryFactory:
+
+    AkBank__AKBKHircType_126 = {
+        0x01: "State",
+        0x02: "Sound",
+        0x03: "Action",
+        0x04: "Event",
+        0x05: "Random/Sequence Container", #RanSeqCntr
+        0x06: "Switch Container", #SwitchCntr
+        0x07: "Actor-Mixer", #ActorMixer
+        0x08: "Bus",
+        0x09: "Layer Container", #LayerCntr
+        0x0a: "Music Segment", #Segment
+        0x0b: "Music Track", #Track
+        0x0c: "Music Switch", #MusicSwitch
+        0x0d: "Music Random/Sequence", #MusicRanSeq
+        0x0e: "Attenuation",
+        0x0f: "DialogueEvent",
+        0x10: "FeedbackBus",
+        0x11: "FeedbackNode",
+        0x12: "FxShareSet",
+        0x13: "FxCustom",
+        0x14: "Auxiliary Bus",
+        0x15: "LFO",
+        0x16: "Envelope",
+        0x17: "AudioDevice",
+    }
     
     @classmethod
     def from_memory_stream(cls, stream):
         hierarchy_type = stream.uint8_read()
+        print(cls.AkBank__AKBKHircType_126[hierarchy_type])
         stream.seek(stream.tell()-1)
-        if hierarchy_type == 2: #sound
+        if hierarchy_type == 2: # sound
             return Sound.from_memory_stream(stream)
-        elif hierarchy_type == 11: #music track
+        elif hierarchy_type == 11: # music track
             return MusicTrack.from_memory_stream(stream)
-        elif hierarchy_type == 0x0A: #music segment
+        elif hierarchy_type == 0x0A: # music segment
             return MusicSegment.from_memory_stream(stream)
         else:
             return HircEntry.from_memory_stream(stream)
@@ -582,27 +654,41 @@ class HircReader:
 class BankParser:
     
     def __init__(self):
-        self.chunks = {}
+        self.chunks: dict[str, bytearray] = {}
         
-    def load(self, bank_data):
+    """
+    For each section, 
+    - The first 4 bytes encoded in UTF-8 describes name of the section 
+    (It should be BKHD, DIDX, DATA, HIRC).
+    - The next 4 bytes is a unsigned 32 integer that encodes the size of this 
+    section
+    - The next immediate byte to the `size`th byte are data of that section.
+    """
+    def load_sections(self, bank_data: bytearray):
         self.chunks.clear()
         reader = MemoryStream()
         reader.write(bank_data)
         reader.seek(0)
         while True:
-            tag = ""
+            section_name = ""
             try:
-                tag = reader.read(4).decode('utf-8')
+                section_name = reader.read(4).decode('utf-8')
             except:
                 break
             size = reader.uint32_read()
-            self.chunks[tag] = reader.read(size)
+            self.chunks[section_name] = reader.read(size)
             
     def GetChunk(self, chunk_tag):
         try:
             return self.chunks[chunk_tag]
         except:
             return None
+
+    def __str__(self):
+        s = ""
+        for k, v in self.chunks.items():
+            s += f"{k}: data len {len(v)}\n"
+        return s
             
 class BankSourceStruct:
 
@@ -714,15 +800,18 @@ class Sound(HircEntry):
         
 class WwiseBank(Subscriber):
     
+    """
+    What is toc_data_header?
+    """
     def __init__(self):
-        self.data = b""
-        self.bank_header = b""
-        self.toc_data_header = b""
-        self.bank_misc_data = b""
-        self.modified = False
-        self.toc_header = None
+        self.data: bytes = b""
+        self.bank_header: bytes = b""
+        self.toc_data_header: bytearray = bytearray() 
+        self.bank_misc_data: bytes = b""
+        self.modified: bool = False
+        self.toc_header: ToCHeader | None = None
         self.dep = None
-        self.modified_count = 0
+        self.modified_count: int = 0
         self.hierarchy = None
         self.content = []
         
@@ -757,11 +846,14 @@ class WwiseBank(Subscriber):
     def get_name(self):
         return self.dep.data
         
-    def get_id(self):
+    def get_id(self) -> int:
+        rid = 0
         try:
-            return self.toc_header.file_id
-        except:
-            return 0
+            assert(self.toc_header != None)
+            rid = self.toc_header.file_id
+        except Exception as e:
+            logger.error(e)
+        return rid
             
     def get_type_id(self):
         try:
@@ -848,11 +940,14 @@ class WwiseBank(Subscriber):
         
 class WwiseStream(Subscriber):
 
+    """
+    What does ToCData include?
+    """
     def __init__(self):
-        self.content = None
-        self.modified = False
-        self.toc_header = None
-        self.TocData = bytearray()
+        self.content: AudioSource | None = None
+        self.modified: bool = False
+        self.toc_header: ToCHeader | None = None
+        self.ToCData = bytearray()
         
     def set_content(self, content):
         try:
@@ -864,7 +959,7 @@ class WwiseStream(Subscriber):
         
     def update(self, content):
         self.toc_header.stream_size = content.size
-        self.TocData[8:12] = content.size.to_bytes(4, byteorder='little')
+        self.ToCData[8:12] = content.size.to_bytes(4, byteorder='little')
         
     def raise_modified(self):
         self.modified = True
@@ -872,11 +967,14 @@ class WwiseStream(Subscriber):
     def lower_modified(self):
         self.modified = False
         
-    def get_id(self):
+    def get_id(self) -> int:
+        rid = 0
         try:
-            return self.toc_header.file_id
-        except:
-            return 0
+            assert(self.toc_header != None)
+            rid = self.toc_header.file_id
+        except Exception as e:
+            logger.error(e)
+        return rid
         
     def get_type_id(self):
         try:
@@ -995,13 +1093,18 @@ class TextBank:
 class FileReader:
     
     def __init__(self):
-        self.wwise_streams = {}
+        self.wwise_streams: dict[int, WwiseStream] = {}
         self.wwise_banks = {}
         self.audio_sources = {}
         self.text_banks = {}
         self.music_track_events = {}
         self.string_entries = {}
         self.music_segments = {}
+
+        """
+        Decipher Test
+        """
+        self.wwise_stream_resource_ids: list[int] = []
         
     def from_file(self, path):
         self.name = os.path.basename(path)
@@ -1151,7 +1254,7 @@ class FileReader:
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
         
-    def load(self, toc_file, stream_file):
+    def load(self, toc_file: MemoryStream, stream_file: MemoryStream):
         self.wwise_streams.clear()
         self.wwise_banks.clear()
         self.audio_sources.clear()
@@ -1162,50 +1265,128 @@ class FileReader:
         
         media_index = MediaIndex()
         
-        self.magic      = toc_file.uint32_read()
-        if self.magic != 4026531857: return False
+        # [Basic header]
+        self.magic = toc_file.uint32_read()
+        if self.magic != 4026531857:
+            return False
 
-        self.num_types   = toc_file.uint32_read()
-        self.num_files   = toc_file.uint32_read()
-        self.unknown    = toc_file.uint32_read()
-        self.unk4Data   = toc_file.read(56)
+        self.num_types = toc_file.uint32_read()
+        self.num_files = toc_file.uint32_read()
+        self.unknown = toc_file.uint32_read()
+        self.unk4Data = toc_file.read(56)
+        # [End of basic header]
+
+        """
+        Usually each archive file contains a table of contents that specifies a 
+        number of game resources that are within that archive file.
+
+        A table of contents is constructed by a bulks of table of content 
+        headers. Let's call it ToCHeader.
+
+        Each ToCHeader describes a game resource in StingRay?
+        """
         toc_file.seek(toc_file.tell() + 32 * self.num_types)
         toc_start = toc_file.tell()
         for n in range(self.num_files):
-            toc_file.seek(toc_start + n*80)
-            toc_header = TocHeader()
+            toc_file.seek(toc_start + n * 80)
+            toc_header = ToCHeader()
             toc_header.from_memory_stream(toc_file)
-            entry = None
+
             if toc_header.type_id == WWISE_STREAM:
+                """
+                Game resource (Wwise Audio Streams)
+                - It can have zero, one or more than one Wwise audio stream.
+                - Each Wwise audio stream's data is located in the .stream file
+                - Each Wwise audio stream resource is a .wem file with (typically) 
+                no other metadata attached.
+
+                - Audio source is a container for storing data of Wwise audio 
+                stream.
+                    - To locate the data of a Wwise Stream in the .stream file, it 
+                    uses a byte offset specified by its associated Wwise Stream. 
+                        - The offset tells the # of bytes it needs to skip ahead to 
+                        locate the data of that Wwise Stream.
+                """
                 audio = AudioSource()
                 audio.stream_type = STREAM
+
                 entry = WwiseStream()
                 entry.toc_header = toc_header
+
                 toc_file.seek(toc_header.toc_data_offset)
-                entry.TocData = toc_file.read(toc_header.toc_data_size)
+                entry.ToCData = toc_file.read(toc_header.toc_data_size)
+
                 stream_file.seek(toc_header.stream_file_offset)
-                audio.set_data(stream_file.read(toc_header.stream_size), notify_subscribers=False, set_modified=False)
+                audio.set_data(
+                        stream_file.read(toc_header.stream_size),
+                        notify_subscribers=False,
+                        set_modified=False)
                 audio.resource_id = toc_header.file_id
                 entry.set_content(audio)
+
+                self.wwise_stream_resource_ids.append(toc_header.file_id)
+
                 self.wwise_streams[entry.get_id()] = entry
             elif toc_header.type_id == WWISE_BANK:
+                """
+                Game Resource (Wwise SoundBank)
+                - What's it?
+
+                - It usually has four sections.
+                  - The bank header section (BKHD)
+
+                  - The data index section (DIDX)
+                    - This contains IDs and file offset in the `DATA` section.
+                    - IDs are not the Resource ID (used by Stingray)
+                    - IDs are Wwise Short ID (32 bits) for identifying its data.
+
+                  - The data section (DATA)
+                    - This section contains sound data. 
+                    - Sound data is a `.wem` file.
+                    - The sound data can either appear 
+                        - in this section, or 
+                        - in the `.stream` file with a small prefetch snippet in 
+                        this section, or
+                        - in the `.stream`
+                    - If a sound is stored completely in the `.stream` file, it 
+                    will not have an entry in the DIDX section.
+
+                  - The Soundbank hirearchy section (HIRC)
+                    - This contain metadata about each sound in the a 
+                    WwsieSoundBank.
+                    - A sound whose metadata describes can either be 
+                        - a fully-streamed sound or,
+                        - a sound that is not stored in `.wem` file.
+                    - Sounds are grouped together into a random container.
+                """
                 entry = WwiseBank()
+
                 entry.toc_header = toc_header
+
                 toc_data_offset = toc_header.toc_data_offset
                 toc_data_size = toc_header.toc_data_size
                 toc_file.seek(toc_data_offset)
                 entry.toc_data_header = toc_file.read(16)
+
+                """
+                Read BKHD, DIDX, DATA, and HIRC section in this WwiseSoundbank
+                """
                 bank = BankParser()
-                bank.load(toc_file.read(toc_header.toc_data_size-16))
-                entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
-                
+                bank.load_sections(toc_file.read(toc_header.toc_data_size - 16))
+                # Why rebuilding the header again? It's already loaded into the 
+                # bank parser
+                entry.bank_header = "BKHD".encode('utf-8') + \
+                                    len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + \
+                                    bank.chunks["BKHD"]
+
                 hirc = HircReader()
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
                     pass
                 entry.hierarchy = hirc
-                #Add all bank sources to the source list
+
+                # Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
                     bank_id = entry.toc_header.file_id
                     media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
@@ -1347,7 +1528,7 @@ class FileReader:
         toc_start = toc_file.tell()
         for n in range(self.num_files):
             toc_file.seek(toc_start + n*80)
-            toc_header = TocHeader()
+            toc_header = ToCHeader()
             toc_header.from_memory_stream(toc_file)
             if toc_header.type_id == WWISE_DEP: #wwise dep
                 dep = WwiseDep()
@@ -1388,7 +1569,7 @@ class FileReader:
         toc_start = toc_file.tell()
         for n in range(self.num_files):
             toc_file.seek(toc_start + n*80)
-            toc_header = TocHeader()
+            toc_header = ToCHeader()
             toc_header.from_memory_stream(toc_file)
             entry = None
             if toc_header.type_id == WWISE_BANK:
@@ -1400,7 +1581,7 @@ class FileReader:
                 entry.toc_data_header = toc_file.read(16)
                 #-------------------------------------
                 bank = BankParser()
-                bank.load(toc_file.read(toc_header.toc_data_size-16))
+                bank.load_sections(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 
                 hirc = HircReader()
