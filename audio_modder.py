@@ -99,7 +99,7 @@ class MemoryStream:
     Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
     '''
     def __init__(self, Data=b"", io_mode = "read"):
-        self.location = 0
+        self.location: int = 0
         self.data = bytearray(Data)
         self.io_mode = io_mode
         self.endian = "<"
@@ -120,7 +120,7 @@ class MemoryStream:
     def is_writing(self):
         return self.io_mode == "write"
 
-    def seek(self, location): # Go To Position In Stream
+    def seek(self, location: int): # Go To Position In Stream
         self.location = location
         if self.location > len(self.data):
             missing_bytes = self.location - len(self.data)
@@ -420,10 +420,11 @@ class ToCHeader:
                 
 class WwiseDep:
 
-    def __init__(self):
+    def __init__(self, toc_header: ToCHeader):
         self.data = ""
+        self.toc_header = toc_header
         
-    def from_memory_stream(self, stream):
+    def from_memory_stream(self, stream: MemoryStream):
         self.offset = stream.tell()
         self.tag = stream.uint32_read()
         self.data_size = stream.uint32_read()
@@ -433,6 +434,14 @@ class WwiseDep:
         return (self.tag.to_bytes(4, byteorder='little')
                 + self.data_size.to_bytes(4, byteorder='little')
                 + self.data.encode('utf-8'))
+
+    def __str__(self):
+        s = f"Wwise Dependency\n"
+        s += f"tag: {self.tag}\n"
+        s += f"data size: {self.data_size}\n"
+        s += f"data: {self.data}\n"
+
+        return s
                 
 class DidxEntry:
     def __init__(self):
@@ -589,23 +598,23 @@ class MusicSegment(HircEntry):
                 b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
             ])
         )
-        
+
 class HircEntryFactory:
 
-    AkBank__AKBKHircType_126 = {
+    hirctype: dict[int, str] = {
         0x01: "State",
         0x02: "Sound",
         0x03: "Action",
         0x04: "Event",
-        0x05: "Random/Sequence Container", #RanSeqCntr
-        0x06: "Switch Container", #SwitchCntr
-        0x07: "Actor-Mixer", #ActorMixer
+        0x05: "Random/Sequence Container",
+        0x06: "Switch Container",
+        0x07: "Actor-Mixer",
         0x08: "Bus",
-        0x09: "Layer Container", #LayerCntr
-        0x0a: "Music Segment", #Segment
-        0x0b: "Music Track", #Track
-        0x0c: "Music Switch", #MusicSwitch
-        0x0d: "Music Random/Sequence", #MusicRanSeq
+        0x09: "Layer Container",
+        0x0a: "Music Segment",
+        0x0b: "Music Track",
+        0x0c: "Music Switch",
+        0x0d: "Music Random/Sequence",
         0x0e: "Attenuation",
         0x0f: "DialogueEvent",
         0x10: "FeedbackBus",
@@ -621,7 +630,6 @@ class HircEntryFactory:
     @classmethod
     def from_memory_stream(cls, stream):
         hierarchy_type = stream.uint8_read()
-        print(cls.AkBank__AKBKHircType_126[hierarchy_type])
         stream.seek(stream.tell()-1)
         if hierarchy_type == 2: # sound
             return Sound.from_memory_stream(stream)
@@ -1265,7 +1273,6 @@ class FileReader:
         
         media_index = MediaIndex()
         
-        # [Basic header]
         self.magic = toc_file.uint32_read()
         if self.magic != 4026531857:
             return False
@@ -1274,17 +1281,7 @@ class FileReader:
         self.num_files = toc_file.uint32_read()
         self.unknown = toc_file.uint32_read()
         self.unk4Data = toc_file.read(56)
-        # [End of basic header]
 
-        """
-        Usually each archive file contains a table of contents that specifies a 
-        number of game resources that are within that archive file.
-
-        A table of contents is constructed by a bulks of table of content 
-        headers. Let's call it ToCHeader.
-
-        Each ToCHeader describes a game resource in StingRay?
-        """
         toc_file.seek(toc_file.tell() + 32 * self.num_types)
         toc_start = toc_file.tell()
         for n in range(self.num_files):
@@ -1293,20 +1290,6 @@ class FileReader:
             toc_header.from_memory_stream(toc_file)
 
             if toc_header.type_id == WWISE_STREAM:
-                """
-                Game resource (Wwise Audio Streams)
-                - It can have zero, one or more than one Wwise audio stream.
-                - Each Wwise audio stream's data is located in the .stream file
-                - Each Wwise audio stream resource is a .wem file with (typically) 
-                no other metadata attached.
-
-                - Audio source is a container for storing data of Wwise audio 
-                stream.
-                    - To locate the data of a Wwise Stream in the .stream file, it 
-                    uses a byte offset specified by its associated Wwise Stream. 
-                        - The offset tells the # of bytes it needs to skip ahead to 
-                        locate the data of that Wwise Stream.
-                """
                 audio = AudioSource()
                 audio.stream_type = STREAM
 
@@ -1339,6 +1322,7 @@ class FileReader:
                     - This contains IDs and file offset in the `DATA` section.
                     - IDs are not the Resource ID (used by Stingray)
                     - IDs are Wwise Short ID (32 bits) for identifying its data.
+                    - Each ID points to a sound data in the data section.
 
                   - The data section (DATA)
                     - This section contains sound data. 
@@ -1372,7 +1356,16 @@ class FileReader:
                 Read BKHD, DIDX, DATA, and HIRC section in this WwiseSoundbank
                 """
                 bank = BankParser()
-                bank.load_sections(toc_file.read(toc_header.toc_data_size - 16))
+                bank_data = toc_file.read(toc_header.toc_data_size - 16)
+                bank_data[0x8] = 0x8D
+                bank_data[0x9] = 0x00
+                bank_data[0xA] = 0x00
+                bank_data[0xB] = 0x00
+                bank.load_sections(bank_data)
+
+                with open(f"{toc_header.file_id}.bnk", "wb") as f:
+                    f.write(bank_data)
+
                 # Why rebuilding the header again? It's already loaded into the 
                 # bank parser
                 entry.bank_header = "BKHD".encode('utf-8') + \
@@ -1397,16 +1390,15 @@ class FileReader:
                         entry.bank_misc_data = entry.bank_misc_data + chunk.encode('utf-8') + len(bank.chunks[chunk]).to_bytes(4, byteorder='little') + bank.chunks[chunk]
                         
                 self.wwise_banks[entry.get_id()] = entry
-            elif toc_header.type_id == WWISE_DEP: #wwise dep
-                dep = WwiseDep()
-                dep.toc_header = toc_header
+            elif toc_header.type_id == WWISE_DEP: # wwise dep
+                dep = WwiseDep(toc_header)
                 toc_file.seek(toc_header.toc_data_offset)
                 dep.from_memory_stream(toc_file)
                 try:
                     self.wwise_banks[toc_header.file_id].dep = dep
                 except KeyError:
                     pass
-            elif toc_header.type_id == STRING: #string_entry
+            elif toc_header.type_id == STRING: # string_entry
                 toc_file.seek(toc_header.toc_data_offset)
                 data = toc_file.read(toc_header.toc_data_size)
                 num_entries = int.from_bytes(data[8:12], byteorder='little')
@@ -1483,8 +1475,8 @@ class FileReader:
                 if isinstance(entry, MusicSegment):
                     self.music_segments[entry.get_id()] = entry
 
-        #construct list of audio sources in each bank
-        #add track_info to audio sources?
+        # construct list of audio sources in each bank
+        # add track_info to audio sources?
         for bank in self.wwise_banks.values():
             for entry in bank.hierarchy.entries.values():
                 for source in entry.sources:
