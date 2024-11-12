@@ -100,7 +100,7 @@ class MemoryStream:
     Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
     '''
     def __init__(self, Data=b"", io_mode = "read"):
-        self.location = 0
+        self.location: int = 0
         self.data = bytearray(Data)
         self.io_mode = io_mode
         self.endian = "<"
@@ -121,7 +121,7 @@ class MemoryStream:
     def is_writing(self):
         return self.io_mode == "write"
 
-    def seek(self, location): # Go To Position In Stream
+    def seek(self, location: int): # Go To Position In Stream
         self.location = location
         if self.location > len(self.data):
             missing_bytes = self.location - len(self.data)
@@ -143,13 +143,42 @@ class MemoryStream:
     def write(self, bytes): # Write Bytes To Stream
         length = len(bytes)
         if self.location + length > len(self.data):
+            """
+            Example
+            
+            self.data (len is 6, cap is 12)
+                    Location
+                    |
+                    |   *- Len        *- Cap
+                    |   |             |
+                    v   v             v
+            0 1 2 3 4 5 6 7 8 9 10 11 12
+            , . | m s ) 
+
+            incoming data (len is 11)
+            0 1 2 3 4 5 6 7 8 9 10
+            a b c d e f h i j k l
+
+            after
+
+            missing_bytes = 4 + 11 - 12 = 3 missing bytes
+
+            self.data (len is 15)
+                                            Location
+                                            |
+                                            |  *- Len   *- Cap
+                                            |  |        |
+                                            v  v        v
+            0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18
+            , . | m a b c d e f h  i  j  k  l
+            """
             missing_bytes = (self.location + length) - len(self.data)
             self.data += bytearray(missing_bytes)
         self.data[self.location:self.location+length] = bytearray(bytes)
         self.location += length
 
-    def read_format(self, format, size):
-        format = self.endian+format
+    def read_format(self, format: str, size: int):
+        format = self.endian + format
         return struct.unpack(format, self.read(size))[0]
         
     def bytes(self, value, size = -1):
@@ -165,28 +194,28 @@ class MemoryStream:
             return bytearray(value)
         return value
         
-    def int8_read(self):
+    def read_int8(self) -> int:
         return self.read_format('b', 1)
 
-    def uint8_read(self):
+    def read_uint8(self) -> int:
         return self.read_format('B', 1)
 
-    def int16_read(self):
+    def read_int16(self) -> int:
         return self.read_format('h', 2)
 
-    def uint16_read(self):
+    def read_uint16(self) -> int:
         return self.read_format('H', 2)
 
-    def int32_read(self):
+    def read_int32(self) -> int:
         return self.read_format('i', 4)
 
-    def uint32_read(self):
+    def read_uint32(self) -> int:
         return self.read_format('I', 4)
 
-    def int64_read(self):
+    def read_int64(self) -> int:
         return self.read_format('q', 8)
 
-    def uint64_read(self):
+    def read_uint64(self) -> int:
         return self.read_format('Q', 8)
         
 def pad_to_16_byte_align(data):
@@ -268,14 +297,14 @@ class Subscriber:
 class AudioSource:
 
     def __init__(self):
-        self.data = b""
-        self.size = 0
-        self.resource_id = 0
-        self.short_id = 0
-        self.modified = False
-        self.data_OLD = b""
+        self.data: bytes = b""
+        self.size: int = 0
+        self.resource_id: int = 0
+        self.short_id: int = 0
+        self.modified: bool = False
+        self.data_OLD: bytes = b""
         self.subscribers = set()
-        self.stream_type = 0
+        self.stream_type: int = 0
         self.track_info = None
         
     def set_data(self, data, notify_subscribers=True, set_modified=True):
@@ -343,20 +372,20 @@ class TocHeader:
     def __init__(self):
         pass
         
-    def from_memory_stream(self, stream):
-        self.file_id             = stream.uint64_read()
-        self.type_id             = stream.uint64_read()
-        self.toc_data_offset     = stream.uint64_read()
-        self.stream_file_offset  = stream.uint64_read()
-        self.gpu_resource_offset = stream.uint64_read()
-        self.unknown1            = stream.uint64_read() #seems to contain duplicate entry index
-        self.unknown2            = stream.uint64_read()
-        self.toc_data_size       = stream.uint32_read()
-        self.stream_size         = stream.uint32_read()
-        self.gpu_resource_size   = stream.uint32_read()
-        self.unknown3            = stream.uint32_read()
-        self.unknown4            = stream.uint32_read()
-        self.entry_index         = stream.uint32_read()
+    def from_memory_stream(self, stream: MemoryStream):
+        self.file_id             = stream.read_uint64()
+        self.type_id             = stream.read_uint64()
+        self.toc_data_offset     = stream.read_uint64()
+        self.stream_file_offset  = stream.read_uint64()
+        self.gpu_resource_offset = stream.read_uint64()
+        self.unknown1            = stream.read_uint64() #seems to contain duplicate entry index
+        self.unknown2            = stream.read_uint64()
+        self.toc_data_size       = stream.read_uint32()
+        self.stream_size         = stream.read_uint32()
+        self.gpu_resource_size   = stream.read_uint32()
+        self.unknown3            = stream.read_uint32()
+        self.unknown4            = stream.read_uint32()
+        self.entry_index         = stream.read_uint32()
         
     def get_data(self):
         return (struct.pack("<QQQQQQQIIIIII",
@@ -376,8 +405,9 @@ class TocHeader:
                 
 class WwiseDep:
 
-    def __init__(self):
+    def __init__(self, toc_header: TocHeader):
         self.data = ""
+        self.toc_header = toc_header
         
     def from_memory_stream(self, stream):
         self.offset = stream.tell()
@@ -571,7 +601,7 @@ class HircReader:
         reader = MemoryStream()
         reader.write(hierarchy_data)
         reader.seek(0)
-        num_items = reader.uint32_read()
+        num_items = reader.read_uint32()
         for item in range(num_items):
             entry = HircEntryFactory.from_memory_stream(reader)
             self.entries[entry.get_id()] = entry
@@ -583,7 +613,7 @@ class HircReader:
 class BankParser:
     
     def __init__(self):
-        self.chunks = {}
+        self.chunks: dict[str, bytearray] = {}
         
     def load(self, bank_data):
         self.chunks.clear()
@@ -591,13 +621,13 @@ class BankParser:
         reader.write(bank_data)
         reader.seek(0)
         while True:
-            tag = ""
+            section_name = ""
             try:
-                tag = reader.read(4).decode('utf-8')
+                section_name = reader.read(4).decode('utf-8')
             except:
                 break
-            size = reader.uint32_read()
-            self.chunks[tag] = reader.read(size)
+            size = reader.read_uint32()
+            self.chunks[section_name] = reader.read(size)
             
     def GetChunk(self, chunk_tag):
         try:
@@ -716,14 +746,14 @@ class Sound(HircEntry):
 class WwiseBank(Subscriber):
     
     def __init__(self):
-        self.data = b""
-        self.bank_header = b""
-        self.toc_data_header = b""
-        self.bank_misc_data = b""
-        self.modified = False
-        self.toc_header = None
-        self.dep = None
-        self.modified_count = 0
+        self.data: bytes = b""
+        self.bank_header: bytes = b""
+        self.toc_data_header: bytearray | Literal[b""] = b""
+        self.bank_misc_data: bytes = b""
+        self.modified: bool = False
+        self.toc_header: TocHeader | None = None
+        self.dep: WwiseBank | None = None
+        self.modified_count: int = 0
         self.hierarchy = None
         self.content = []
         
@@ -849,10 +879,9 @@ class WwiseBank(Subscriber):
         
 class WwiseStream(Subscriber):
 
-    def __init__(self):
-        self.content = None
-        self.modified = False
-        self.toc_header = None
+    def __init__(self, toc_header: TocHeader):
+        self.modified: bool = False
+        self.toc_header = toc_header 
         self.TocData = bytearray()
         
     def set_content(self, content):
@@ -996,7 +1025,7 @@ class TextBank:
 class FileReader:
     
     def __init__(self):
-        self.wwise_streams = {}
+        self.wwise_streams: dict[int, WwiseStream] = {}
         self.wwise_banks = {}
         self.audio_sources = {}
         self.text_banks = {}
@@ -1152,7 +1181,7 @@ class FileReader:
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
         
-    def load(self, toc_file, stream_file):
+    def load(self, toc_file: MemoryStream, stream_file: MemoryStream):
         self.wwise_streams.clear()
         self.wwise_banks.clear()
         self.audio_sources.clear()
@@ -1163,39 +1192,55 @@ class FileReader:
         
         media_index = MediaIndex()
         
-        self.magic      = toc_file.uint32_read()
-        if self.magic != 4026531857: return False
+        self.magic = toc_file.read_uint32()
+        if self.magic != 4026531857: 
+            return False
 
-        self.num_types   = toc_file.uint32_read()
-        self.num_files   = toc_file.uint32_read()
-        self.unknown    = toc_file.uint32_read()
-        self.unk4Data   = toc_file.read(56)
+        """
+        [Basic Header Infomration]
+        """
+        self.num_types = toc_file.read_uint32()
+        self.num_files = toc_file.read_uint32()
+        self.unknown   = toc_file.read_uint32()
+        self.unk4Data  = toc_file.read(56)
+        """
+        [End of Basic Header Infomration]
+        """
+
         toc_file.seek(toc_file.tell() + 32 * self.num_types)
+
         toc_start = toc_file.tell()
         for n in range(self.num_files):
             toc_file.seek(toc_start + n*80)
             toc_header = TocHeader()
             toc_header.from_memory_stream(toc_file)
-            entry = None
             if toc_header.type_id == WWISE_STREAM:
                 audio = AudioSource()
                 audio.stream_type = STREAM
-                entry = WwiseStream()
-                entry.toc_header = toc_header
+
+                entry = WwiseStream(toc_header)
+
                 toc_file.seek(toc_header.toc_data_offset)
                 entry.TocData = toc_file.read(toc_header.toc_data_size)
+
                 stream_file.seek(toc_header.stream_file_offset)
-                audio.set_data(stream_file.read(toc_header.stream_size), notify_subscribers=False, set_modified=False)
+                audio.set_data(stream_file.read(toc_header.stream_size),
+                               notify_subscribers=False,
+                               set_modified=False)
                 audio.resource_id = toc_header.file_id
                 entry.set_content(audio)
+
                 self.wwise_streams[entry.get_id()] = entry
             elif toc_header.type_id == WWISE_BANK:
                 entry = WwiseBank()
+
                 entry.toc_header = toc_header
+
                 toc_data_offset = toc_header.toc_data_offset
                 toc_data_size = toc_header.toc_data_size
                 toc_file.seek(toc_data_offset)
                 entry.toc_data_header = toc_file.read(16)
+
                 bank = BankParser()
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
@@ -1206,7 +1251,8 @@ class FileReader:
                 except KeyError:
                     pass
                 entry.hierarchy = hirc
-                #Add all bank sources to the source list
+
+                # Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
                     bank_id = entry.toc_header.file_id
                     media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
@@ -1217,9 +1263,9 @@ class FileReader:
                         entry.bank_misc_data = entry.bank_misc_data + chunk.encode('utf-8') + len(bank.chunks[chunk]).to_bytes(4, byteorder='little') + bank.chunks[chunk]
                         
                 self.wwise_banks[entry.get_id()] = entry
-            elif toc_header.type_id == WWISE_DEP: #wwise dep
-                dep = WwiseDep()
-                dep.toc_header = toc_header
+            elif toc_header.type_id == WWISE_DEP: # wwise dep
+                dep = WwiseDep(toc_header)
+
                 toc_file.seek(toc_header.toc_data_offset)
                 dep.from_memory_stream(toc_file)
                 try:
@@ -1337,12 +1383,12 @@ class FileReader:
         with open(archive_file, 'r+b') as f:
             toc_file = MemoryStream(f.read())
 
-        self.magic      = toc_file.uint32_read()
+        self.magic      = toc_file.read_uint32()
         if self.magic != 4026531857: return False
 
-        self.num_types   = toc_file.uint32_read()
-        self.num_files   = toc_file.uint32_read()
-        self.unknown    = toc_file.uint32_read()
+        self.num_types   = toc_file.read_uint32()
+        self.num_files   = toc_file.read_uint32()
+        self.unknown    = toc_file.read_uint32()
         self.unk4Data   = toc_file.read(56)
         toc_file.seek(toc_file.tell() + 32 * self.num_types)
         toc_start = toc_file.tell()
@@ -1378,12 +1424,12 @@ class FileReader:
         with open(archive_file, 'r+b') as f:
             toc_file = MemoryStream(f.read())
 
-        self.magic      = toc_file.uint32_read()
+        self.magic      = toc_file.read_uint32()
         if self.magic != 4026531857: return False
 
-        self.num_types   = toc_file.uint32_read()
-        self.num_files   = toc_file.uint32_read()
-        self.unknown    = toc_file.uint32_read()
+        self.num_types   = toc_file.read_uint32()
+        self.num_files   = toc_file.read_uint32()
+        self.unknown    = toc_file.read_uint32()
         self.unk4Data   = toc_file.read(56)
         toc_file.seek(toc_file.tell() + 32 * self.num_types)
         toc_start = toc_file.tell()
