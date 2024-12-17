@@ -3,7 +3,7 @@ import subprocess
 import shutil
 
 import config as cfg 
-import db
+import db_access
 
 from tkinter.messagebox import showwarning
 from tkinter.messagebox import showerror
@@ -63,20 +63,20 @@ if __name__ == "__main__":
                         "restricted to .wem files only")
             WWISE_CLI = ""
 
-    lookup_store: db.LookupStore | None = None
+    database: db_access.SQLiteDatabase | None = None
     
     if not os.path.exists(GAME_FILE_LOCATION()):
         showwarning(title="Missing Game Data", 
                     message="No folder selected for Helldivers data folder. "
                     "Audio archive search is disabled.")
-    elif os.path.exists("hd_audio_db.db"):
-        sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
+    elif os.path.exists("database"):
+        sqlite_initializer = db_access.config_sqlite_conn("database")
         try:
-            lookup_store = db.SQLiteLookupStore(sqlite_initializer, logger)
+            database = db_access.SQLiteDatabase(sqlite_initializer)
         except Exception as err:
             logger.error("Failed to connect to audio archive database", 
                          stack_info=True)
-            lookup_store = None
+            database = None
     else:
         logger.warning("Please ensure `hd_audio_db.db` is in the same folder as "
                 "the executable to enable built-in audio archive search.")
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
     file_handler = FileHandler()
-    window = MainWindow(app_state, lookup_store, file_handler, sound_handler)
+    window = MainWindow(app_state, database, file_handler, sound_handler)
     
     app_state.save_config()
 
