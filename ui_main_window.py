@@ -1,5 +1,7 @@
+import json
 import os
 import pathlib
+import sqlite3
 import subprocess
 
 from functools import partial, cmp_to_key
@@ -17,7 +19,7 @@ from typing import Any, Union
 from watchdog.observers import Observer
 
 import config as cfg
-import db
+import db_access
 import fileutil
 
 from const_global import language, language_lookup, LANGUAGE_MAPPING
@@ -28,7 +30,7 @@ from game_asset_entity import AudioSource, HircEntry, MusicSegment, MusicTrack, 
 from fileutil import list_files_recursive, std_path
 from log import logger
 
-from ui_archive_search import ArchiveSearch
+# from ui_archive_search import ArchiveSearch
 from ui_controller_file import FileHandler
 from ui_controller_sound import SoundHandler
 from ui_controller_workspace import WorkspaceEventHandler
@@ -36,8 +38,8 @@ from ui_window_component import AudioSourceWindow, EventWindow, \
         StringEntryWindow, MusicSegmentWindow
 
 
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
+WINDOW_WIDTH = 1920
+WINDOW_HEIGHT = 1080
 
 
 class MainWindow:
@@ -75,11 +77,11 @@ class MainWindow:
 
     def __init__(self, 
                  app_state: cfg.Config, 
-                 lookup_store: db.LookupStore | None,
+                 database: db_access.SQLiteDatabase | None,
                  file_handler: FileHandler,
                  sound_handler: SoundHandler):
         self.app_state = app_state
-        self.lookup_store = lookup_store
+        self.database = database
         self.file_handler = file_handler
         self.sound_handler = sound_handler
         self.watched_paths = []
@@ -95,76 +97,23 @@ class MainWindow:
             logger.critical("Error occurred when loading themes:")
             logger.critical(e)
             logger.critical("Ensure azure.tcl and the themes folder are in the same folder as the executable")
-
-        self.fake_image = tkinter.PhotoImage(width=1, height=1)
-
-        self.top_bar = Frame(self.root, width=WINDOW_WIDTH, height=40)
-        self.search_text_var = tkinter.StringVar(self.root)
-        self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
-        self.top_bar.pack(side="top", fill='x')
-        if lookup_store != None and os.path.exists(GAME_FILE_LOCATION()):
-            self.init_archive_search_bar()
-
-        self.up_button = ttk.Button(self.top_bar, text='\u25b2',
-                                    width=2, command=self.search_up)
-        self.down_button = ttk.Button(self.top_bar, text='\u25bc',
-                                      width=2, command=self.search_down)
-
-        self.search_label = ttk.Label(self.top_bar,
-                                      width=10,
-                                      font=('Segoe UI', 14),
-                                      justify="center")
-
-        self.search_icon = ttk.Label(self.top_bar, font=('Arial', 20), text="\u2315")
-
-        self.search_label.pack(side="right", padx=1)
-        self.search_bar.pack(side="right", padx=1)
-        self.down_button.pack(side="right")
-        self.up_button.pack(side="right")
-        self.search_icon.pack(side="right", padx=4)
-
         self.default_bg = "#333333"
         self.default_fg = "#ffffff"
-        
+
+        self._init_treeview_search_bar()
+
         self.window = PanedWindow(self.root, orient=HORIZONTAL, borderwidth=0, background="white")
         self.window.config(sashwidth=8, sashrelief="raised")
         self.window.pack(fill=BOTH)
 
-        
         self.top_bar.pack(side="top")
         
         self.search_results = []
         self.search_result_index = 0
 
-        self.init_workspace()
-        
-        self.treeview_panel = Frame(self.window)
-        self.scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
-        self.treeview = ttk.Treeview(self.treeview_panel, columns=("type",), height=WINDOW_HEIGHT-100)
-        self.scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
-        self.treeview.pack(side="right", padx=8, pady=8, fill="x", expand=True)
-        self.treeview.heading("#0", text="File")
-        self.treeview.column("#0", width=250)
-        self.treeview.column("type", width=100)
-        self.treeview.heading("type", text="Type")
-        self.treeview.configure(yscrollcommand=self.scroll_bar.set)
-        self.treeview.bind("<<TreeviewSelect>>", self.show_info_window)
-        self.treeview.bind("<Double-Button-1>", self.treeview_on_double_click)
-        self.treeview.bind("<Return>", self.treeview_on_double_click)
-        self.scroll_bar['command'] = self.treeview.yview
-
-        self.entry_info_panel = Frame(self.window, width=int(WINDOW_WIDTH/3))
-        self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
-        
-        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel,
-                                                  self.play_audio,
-                                                  self.check_modified)
-        self.event_info_panel = EventWindow(self.entry_info_panel,
-                                            self.check_modified)
-        self.string_info_panel = StringEntryWindow(self.entry_info_panel,
-                                                   self.check_modified)
-        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
-                                                     self.check_modified)
+        self._init_workspace()
+        self._init_treeview()
+        self._init_info_panel()
                                                      
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
@@ -174,109 +123,20 @@ class MainWindow:
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
 
+        # [Menu]
         self.menu = Menu(self.root, tearoff=0)
-        
-        self.selected_view = StringVar()
-        self.selected_view.set(self.app_state.view_mode)
-        self.view_menu = Menu(self.menu, tearoff=0)
-        self.view_menu.add_radiobutton(label="Sources", 
-                                       variable=self.selected_view, 
-                                       value="SourceView", 
-                                       command=self.create_source_view)
-        self.view_menu.add_radiobutton(label="Hierarchy", 
-                                       variable=self.selected_view, 
-                                       value="HierarchyView", 
-                                       command=self.create_hierarchy_view)
-        
-        self.selected_language = StringVar()
-        self.options_menu = Menu(self.menu, tearoff=0)
-        
-        self.selected_theme = StringVar()
-        self.selected_theme.set(self.app_state.theme)
-        self.set_theme()
-        self.theme_menu = Menu(self.menu, tearoff=0)
-        self.theme_menu.add_radiobutton(label="Dark Mode", variable=self.selected_theme, value="dark_mode", command=self.set_theme)
-        self.theme_menu.add_radiobutton(label="Light Mode", variable=self.selected_theme, value="light_mode", command=self.set_theme)
-        self.options_menu.add_cascade(menu=self.theme_menu, label="Set Theme")
-        
-        self.language_menu = Menu(self.options_menu, tearoff=0)
-        
-        self.file_menu = Menu(self.menu, tearoff=0)
-
-        self.recent_file_menu = Menu(self.file_menu, tearoff=0)
-
-        self.load_archive_menu = Menu(self.menu, tearoff=0)
-        if os.path.exists(GAME_FILE_LOCATION()):
-            self.load_archive_menu.add_command(
-                label="From HD2 Data Folder",
-                command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
-            )
-        self.load_archive_menu.add_command(
-            label="From File Explorer",
-            command=self.load_archive
-        )
-
-        for item in reversed(self.app_state.recent_files):
-            item = os.path.normpath(item)
-            self.recent_file_menu.add_command(
-                label=item,
-                command=partial(self.load_archive, "", item)
-            )
-
-        self.import_menu = Menu(self.menu, tearoff=0)
-        self.import_menu.add_command(
-            label="Import Patch File",
-            command=self.load_patch
-        )
-        self.import_menu.add_command(
-            label="Import Audio Files",
-            command=self.import_audio_files
-        )
-        self.import_menu.add_command(
-            label="Import using spec.json (.wem)",
-            command=lambda: self.file_handler.load_wems_spec() or 
-                self.check_modified()
-        )
-        if os.path.exists(WWISE_CLI):
-            self.import_menu.add_command(
-                label="Import using spec.json (.wav)",
-                command=lambda: self.file_handler.load_convert_spec() or 
-                    self.check_modified()
-            )
-            
-        self.file_menu.add_cascade(
-            menu=self.load_archive_menu, 
-            label="Open"
-        )
-        self.file_menu.add_cascade(
-            menu=self.recent_file_menu,
-            label="Open Recent"
-        )
-        self.file_menu.add_cascade(
-            menu=self.import_menu,
-            label="Import"
-        )
-        
-        self.file_menu.add_command(label="Save", command=self.save_archive)
-        self.file_menu.add_command(label="Write Patch", command=self.write_patch)
-        
-        self.file_menu.add_command(label="Add a Folder to Workspace",
-                                   command=self.add_new_workspace)
-        
-        self.edit_menu = Menu(self.menu, tearoff=0)
-        self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
-        
-        self.dump_menu = Menu(self.menu, tearoff=0)
-        if os.path.exists(VGMSTREAM):
-            self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
-        self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
-        
+        self._init_view_menu()
+        self._init_option_menu()
+        self._init_file_menu()
+        self._init_edit_menu()
+        self._init_dump_menu()
         self.menu.add_cascade(label="File", menu=self.file_menu)
         self.menu.add_cascade(label="Edit", menu=self.edit_menu)
         self.menu.add_cascade(label="Dump", menu=self.dump_menu)
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
         self.root.config(menu=self.menu)
+        # [End]
         
         self.treeview.drop_target_register(DND_FILES)
         self.workspace.drop_target_register(DND_FILES)
@@ -297,6 +157,192 @@ class MainWindow:
         self.root.resizable(True, True)
         self.root.after(100, self.load_most_recent_archive)
         self.root.mainloop()
+
+    def _init_treeview_search_bar(self):
+        self.fake_image = tkinter.PhotoImage(width=1, height=1)
+
+        self.top_bar = Frame(self.root, width=WINDOW_WIDTH, height=40)
+        self.search_text_var = tkinter.StringVar(self.root)
+        self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
+        self.top_bar.pack(side="top", fill='x')
+        if self.database != None and os.path.exists(GAME_FILE_LOCATION()):
+            self.init_archive_search_bar()
+
+        self.up_button = ttk.Button(self.top_bar, text='\u25b2',
+                                    width=2, command=self.search_up)
+        self.down_button = ttk.Button(self.top_bar, text='\u25bc',
+                                      width=2, command=self.search_down)
+
+        self.search_label = ttk.Label(self.top_bar,
+                                      width=10,
+                                      font=('Segoe UI', 14),
+                                      justify="center")
+
+        self.search_icon = ttk.Label(self.top_bar, font=('Arial', 20), text="\u2315")
+
+        self.search_label.pack(side="right", padx=1)
+        self.search_bar.pack(side="right", padx=1)
+        self.down_button.pack(side="right")
+        self.up_button.pack(side="right")
+        self.search_icon.pack(side="right", padx=4)
+
+
+    def _init_view_menu(self):
+        self.selected_view = StringVar()
+        self.selected_view.set(self.app_state.view_mode)
+        self.view_menu = Menu(self.menu, tearoff=0)
+        self.view_menu.add_radiobutton(label="Sources", 
+                                       variable=self.selected_view, 
+                                       value="SourceView", 
+                                       command=self.create_source_view)
+        self.view_menu.add_radiobutton(label="Hierarchy", 
+                                       variable=self.selected_view, 
+                                       value="HierarchyView", 
+                                       command=self.create_hierarchy_view)
+
+    def _init_option_menu(self):
+        self.options_menu = Menu(self.menu, tearoff=0)
+        
+        self.selected_theme = StringVar()
+        self.selected_theme.set(self.app_state.theme)
+        self.set_theme()
+        self.theme_menu = Menu(self.menu, tearoff=0)
+        self.theme_menu.add_radiobutton(label="Dark Mode", variable=self.selected_theme, value="dark_mode", command=self.set_theme)
+        self.theme_menu.add_radiobutton(label="Light Mode", variable=self.selected_theme, value="light_mode", command=self.set_theme)
+        
+        self.selected_language = StringVar()
+        self.language_menu = Menu(self.options_menu, tearoff=0)
+        self.options_menu.add_cascade(menu=self.theme_menu, label="Set Theme")
+
+    def _init_file_menu(self):
+        self.file_menu = Menu(self.menu, tearoff=0)
+
+        self.recent_file_menu = Menu(self.file_menu, tearoff=0)
+
+        # [Load archive menu]
+        self.load_archive_menu = Menu(self.menu, tearoff=0)
+        if os.path.exists(GAME_FILE_LOCATION()):
+            self.load_archive_menu.add_command(
+                label="From HD2 Data Folder",
+                command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
+            )
+        self.load_archive_menu.add_command(
+            label="From File Explorer",
+            command=self.load_archive
+        )
+
+        for item in reversed(self.app_state.recent_files):
+            item = os.path.normpath(item)
+            self.recent_file_menu.add_command(
+                label=item,
+                command=partial(self.load_archive, "", item)
+            )
+        # [End]
+
+        # [Import menu]
+        self.import_menu = Menu(self.menu, tearoff=0)
+        self.import_menu.add_command(
+            label="Import Patch File",
+            command=self.load_patch
+        )
+        self.import_menu.add_command(
+            label="Import Audio Files",
+            command=self.import_audio_files
+        )
+        self.import_menu.add_command(
+            label="Import using spec.json (.wem)",
+            command=lambda: self.file_handler.load_wems_spec() or 
+                self.check_modified()
+        )
+        if os.path.exists(WWISE_CLI):
+            self.import_menu.add_command(
+                label="Import using spec.json (.wav)",
+                command=lambda: self.file_handler.load_convert_spec() or 
+                    self.check_modified()
+            )
+        # [End]
+            
+        self.file_menu.add_cascade(
+            menu=self.load_archive_menu, 
+            label="Open"
+        )
+        self.file_menu.add_cascade(
+            menu=self.recent_file_menu,
+            label="Open Recent"
+        )
+        self.file_menu.add_cascade(
+            menu=self.import_menu,
+            label="Import"
+        )
+        
+        self.file_menu.add_command(label="Save", command=self.save_archive)
+        self.file_menu.add_command(label="Write Patch", command=self.write_patch)
+        self.file_menu.add_command(label="Add a Folder to Workspace",
+                                   command=self.add_new_workspace)
+    def _init_edit_menu(self):
+        self.edit_menu = Menu(self.menu, tearoff=0)
+        self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
+
+    def _init_dump_menu(self):
+        self.dump_menu = Menu(self.menu, tearoff=0)
+        if os.path.exists(VGMSTREAM):
+            self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
+        self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
+
+    def _init_info_panel(self):
+        self.entry_info_panel = Frame(self.window, width=int(WINDOW_WIDTH/3))
+        self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
+        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel,
+                                                  self.play_audio,
+                                                  self.check_modified)
+        self.event_info_panel = EventWindow(self.entry_info_panel,
+                                            self.check_modified)
+        self.string_info_panel = StringEntryWindow(self.entry_info_panel,
+                                                   self.check_modified)
+        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
+                                                     self.check_modified)
+
+    def _init_treeview(self):
+        self.treeview_panel = Frame(self.window)
+        self.treeview_scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
+        self.treeview = ttk.Treeview(
+                self.treeview_panel, 
+                columns=("type","label",), 
+                height=WINDOW_HEIGHT-100)
+        self.treeview_scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
+        self.treeview.pack(side="right", padx=8, pady=8, fill="x", expand=True)
+
+        self.treeview.heading("#0", text="File")
+        self.treeview.column("#0", width=250)
+        self.treeview.heading("type", text="Type")
+        self.treeview.column("type", width=100)
+        self.treeview.heading("label", text="Label")
+        self.treeview.column("label", width=300)
+
+        self.treeview.configure(yscrollcommand=self.treeview_scroll_bar.set)
+        self.treeview.bind("<<TreeviewSelect>>", self.show_info_window)
+        self.treeview.bind("<Double-Button-1>", self.treeview_on_double_click)
+        self.treeview.bind("<Return>", self.treeview_on_double_click)
+        self.treeview_scroll_bar['command'] = self.treeview.yview
+
+    def _init_workspace(self):
+        self.workspace_panel = Frame(self.window)
+        self.window.add(self.workspace_panel)
+        self.workspace = ttk.Treeview(self.workspace_panel, height=WINDOW_HEIGHT - 100)
+        self.workspace.heading("#0", text="Workspace Folders")
+        self.workspace.column("#0", width=256+16)
+        self.workspace_scroll_bar = ttk.Scrollbar(self.workspace_panel, orient=VERTICAL)
+        self.workspace_scroll_bar['command'] = self.workspace.yview
+        self.workspace_scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
+        self.workspace.pack(side="right", padx=8, pady=8, fill="x", expand=True)
+        self.workspace_inodes: list[fileutil.INode] = []
+        self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
+        self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
+        self.render_workspace()
+        self.event_handler = WorkspaceEventHandler(self.workspace)
+        self.observer = Observer()
+        self.reload_watched_paths()
+        self.observer.start()
 
     def workspace_drag_assist(self, event):
         selected_item = self.workspace.identify_row(event.y)
@@ -348,6 +394,7 @@ class MainWindow:
         self.workspace.column("#0", width=256+16)
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
+        self.treeview.column("label", width=300)
         self.check_modified()
         
     def get_colors(self, modified=False):
@@ -552,26 +599,9 @@ class MainWindow:
             except:
                 pass
 
-    def init_workspace(self):
-        self.workspace_panel = Frame(self.window)
-        self.window.add(self.workspace_panel)
-        self.workspace = ttk.Treeview(self.workspace_panel, height=WINDOW_HEIGHT - 100)
-        self.workspace.heading("#0", text="Workspace Folders")
-        self.workspace.column("#0", width=256+16)
-        self.workspace_scroll_bar = ttk.Scrollbar(self.workspace_panel, orient=VERTICAL)
-        self.workspace_scroll_bar['command'] = self.workspace.yview
-        self.workspace_scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
-        self.workspace.pack(side="right", padx=8, pady=8, fill="x", expand=True)
-        self.workspace_inodes: list[fileutil.INode] = []
-        self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
-        self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
-        self.render_workspace()
-        self.event_handler = WorkspaceEventHandler(self.workspace)
-        self.observer = Observer()
-        self.reload_watched_paths()
-        self.observer.start()
-
     def init_archive_search_bar(self):
+        pass
+        """
         if self.lookup_store == None:
             logger.critical("Audio archive database connection is None after \
                     bypassing all check.", stack_info=True)
@@ -596,6 +626,7 @@ class MainWindow:
         self.category_search.pack(side="left", padx=4, pady=8)
         self.category_search.bind("<<ComboboxSelected>>",
                                   self.on_category_search_bar_select)
+        """
 
     def on_archive_search_bar_return(self, value: str):
         splits = value.split(" || ")
@@ -607,6 +638,8 @@ class MainWindow:
         self.load_archive(initialdir="", archive_file=archive_file)
 
     def on_category_search_bar_select(self, _):
+        pass
+        """
         if self.lookup_store == None:
             logger.critical("Audio archive database connection is None after \
                     bypassing all check.", stack_info=True)
@@ -620,6 +653,7 @@ class MainWindow:
         self.archive_search.set_entries(entries)
         self.archive_search.focus_set()
         self.category_search.selection_clear()
+        """
 
     def _treeview_menu_collaspe_selection(self):
         selects = set(self.treeview.selection())
@@ -701,6 +735,11 @@ class MainWindow:
                 command=self.copy_id
             )
 
+            self.right_click_menu.add_command(
+                label="Generate specification file",
+                command=self.generate_sepcfication,
+            )
+            
             if enable[1]:
                 self.right_click_menu.add_command(
                     label=("Create Separator"),
@@ -718,6 +757,10 @@ class MainWindow:
                 )
 
             enable[3] and self._treeview_menu_add_audio_export(enable[0]) # type: ignore
+            enable[3] and self.right_click_menu.add_command( # type: ignore
+                label=("Label Audio Source" if enable[0] else "Label Audio Sources"),
+                command=lambda: self.label_audio_source(selects)
+            )
 
             self.right_click_menu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
@@ -855,11 +898,56 @@ class MainWindow:
                         text = f"{tabs}{text}: {tags[0]}"
                     case _:
                         tags = self.get_entry_tags(top[1])
-                        text = f"{tabs}{str(tags[0])}"
+                        text = f"{tabs}{"" if values[1] == "" else values[1]}: {str(tags[0])}"
 
                 content.append(text)
 
         self.root.clipboard_append("\n".join(content))
+        self.root.update()
+
+    def generate_sepcfication(self):
+        self.root.clipboard_clear()
+
+        stack: list[tuple[int, str]] = []
+        spec = \
+"""{
+    "v": 2,
+    "specs": [
+        {
+            "workspace": "",
+            "mapping": {
+%s
+            },
+            "write_patch_to": ""
+        }
+    ]
+}
+"""
+        mapping: list[str] = []
+        for select in self.treeview.selection():
+            stack.clear()
+            tab = 0
+            stack = [(tab, select)]
+            while len(stack) > 0:
+                top = stack.pop()
+
+                for child in self.treeview.get_children(top[1]):
+                    stack.append((top[0] + 1, child))
+
+                values = self.get_entry_values(top[1])
+                etype = values[0]
+
+                match etype:
+                    case MainWindow.ENTRY_TYPE_SEPARATOR:
+                        pass
+                    case MainWindow.ENTRY_TYPE_SOUND_BANK | MainWindow.ENTRY_TYPE_TEXT_BANK:
+                        pass
+                    case _:
+                        tags = self.get_entry_tags(top[1])
+                        if values[1] != "":
+                            mapping.append(f"{values[1].rjust(len(values[1]) + 16)}: {tags[0]}")
+
+        self.root.clipboard_append(spec % (",\n".join(mapping)))
         self.root.update()
 
     def dump_as_wem(self):
@@ -934,16 +1022,19 @@ class MainWindow:
             - index 0 -> Type of treeview entry
     """
     def create_treeview_entry(
-            self, entry: TreeViewEntry | None, 
-            parent_view_id: str = ""):
+            self, 
+            entry: TreeViewEntry | None, 
+            parent_view_id: str = "",
+            label: str = ""):
         if entry is None:
             return ""
 
         if isinstance(entry, cfg.Separator):
-            return self.treeview.insert(parent_view_id, 0, 
-                                        text=entry.label,
-                                        values=(MainWindow.ENTRY_TYPE_SEPARATOR,),
-                                        tags=(entry.uid,))
+            return self.treeview.insert(
+                    parent_view_id, 0, 
+                    text=entry.label,
+                    values=(MainWindow.ENTRY_TYPE_SEPARATOR,label,),
+                    tags=(entry.uid,))
 
         tree_entry = self.treeview.insert(
             parent_view_id, END, tags=str(entry.get_id()))
@@ -976,7 +1067,7 @@ class MainWindow:
                 name = entry.dep.data.split('/')[-1]
 
         self.treeview.item(tree_entry, text=name)
-        self.treeview.item(tree_entry, values=(entry_type,))
+        self.treeview.item(tree_entry, values=(entry_type,label,))
 
         return tree_entry
         
@@ -1095,7 +1186,8 @@ class MainWindow:
         self.treeview.delete(*self.treeview.get_children())
         self.app_state.view_mode = "SourceView"
 
-        existing_sources = set()
+        unique_audio_sources: set[int] = set()
+        existing_audio_sources: set[int] = set()
         banks = self.file_handler.get_wwise_banks()
         active_archive = std_path(self.file_handler.file_reader.path)
         for bank in banks.values():
@@ -1103,19 +1195,22 @@ class MainWindow:
                 raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {active_archive}"
                                    " is missing hierarchy data")
 
-            existing_sources.clear()
+            existing_audio_sources.clear()
             bank_entry = self.create_treeview_entry(bank)
 
             for hierarchy_entry in bank.hierarchy.entries.values():
                 for source in hierarchy_entry.sources:
                     if source.plugin_id != VORBIS or \
-                       source.source_id in existing_sources:
+                       source.source_id in existing_audio_sources:
                            continue
-                    existing_sources.add(source.source_id)
 
-                    self.create_treeview_entry(
-                        self.file_handler
-                            .get_audio_by_id(source.source_id), bank_entry)
+                    existing_audio_sources.add(source.source_id)
+
+                    audio_source = self.file_handler.get_audio_by_id(source.source_id)
+                    if audio_source == None:
+                        continue
+                    self.create_treeview_entry(audio_source, bank_entry)
+                    unique_audio_sources.add(source.source_id)
 
         for entry in self.file_handler.file_reader.text_banks.values():
             if entry.language != language:
@@ -1126,6 +1221,20 @@ class MainWindow:
                     self.file_handler
                         .file_reader
                         .string_entries[language][string_id], e)
+
+        if self.database != None:
+            labels = self.database.get_sound_label_by_source_id_view_many(
+                list(unique_audio_sources)
+            )
+            for source_id, label in labels.items():
+                entry_view_id = self.treeview.tag_has(source_id)
+                if len(entry_view_id) <= 0:
+                    raise RuntimeError(f"No tree entry associated with {source_id}")
+                if len(entry_view_id) > 1:
+                    raise RuntimeError(f"Source id {source_id} has more than one "
+                                       "tree view entry")
+                values = self.get_entry_values(entry_view_id[0])
+                self.treeview.item(entry_view_id[0], values=(values[0], label))
 
         if active_archive not in self.app_state.separators_db.archive_namespace:
             self.check_modified()
@@ -1457,6 +1566,72 @@ class MainWindow:
 
         self.app_state.rename_separator(tags[0], label)
         self.treeview.item(sep_view_id, text=label)
+
+    def label_audio_source(self, audio_source_view_ids: tuple[str]):
+        if self.database == None:
+            logger.warning("No database is attached with audio modding tool"
+                           "Abort.")
+            return
+
+        buffer = \
+"""# All lines that start with hashtag `#` will be ignore
+# Do not modify the number ID on the left side of the colon `:`
+# Only modify the text string within the quotation `"`
+# All label must be within the quotation `"`
+# Do not add extra entries / lines
+# Do not add extrat quotation `"`\n"""
+
+        # dict[entry_id, tuple[entry_view_id, entry_type]]
+        invariant: dict[str, tuple[str, str]] = {}
+        # list[tuple[entry_view_id, entry_label]]
+        entries: list[tuple[str, str]] = []
+        for audio_source_view_id in audio_source_view_ids:
+            values = self.get_entry_values(audio_source_view_id)
+            entry_id = self.get_entry_tags(audio_source_view_id)[0]
+            invariant[entry_id] = (audio_source_view_id, values[0])
+            entries.append((entry_id, values[1]))
+
+        buffer += "\n".join([f"{entry[0]}: \"{entry[1]}\"" for entry in entries])
+
+        tmp = os.path.join(os.path.join(CACHE, "label_buffer"))
+        with open(tmp, "w") as f:
+            f.write(buffer)
+        rcode = subprocess.Popen(["notepad", tmp]).wait()
+        if rcode != 0:
+            logger.error(f"Exception occur when editing label_buffer. Code {rcode}")
+
+        # list[tuple[label, wwise_short_id]]
+        reqs: list[tuple[str, str]] = []
+        with open(tmp, "r") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+
+                splits = line.split(":", 1)
+                if len(splits) != 2:
+                    logger.error("Malform label request. Abort operation.")
+                    return
+                if splits[0] not in invariant:
+                    logger.error(f"Malform label request: entry id {splits[0]}"
+                                 "is not in the list of request entry id. Abort"
+                                 " operation.")
+                    return
+                
+                reqs.append((splits[1].strip().replace("\"", ""), splits[0]))
+        
+        try:
+            self.database.update_sound_label_by_source_id_many(reqs)
+            os.remove(tmp)
+            for req in reqs:
+                self.treeview.item(
+                    invariant[req[1]][0],
+                    values=(invariant[req[1]][1], req[0]),
+                )
+        except sqlite3.OperationalError as err:
+            logger.error(f"Failed to update sound label: {err}")
+        except OSError as err:
+            logger.error(f"Failed to remove label buffer. {err}")
+
         
     def load_wavs(self, wavs: list[str] | None = None):
         self.sound_handler.kill_sound()
