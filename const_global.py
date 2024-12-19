@@ -47,6 +47,7 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     DIR = os.path.dirname(sys.argv[0])
 
 CACHE = os.path.join(DIR, ".cache")
+CACHE_WEM = os.path.join(CACHE, "wem")
 
 DEFAULT_WWISE_PROJECT = os.path.join(
         DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
