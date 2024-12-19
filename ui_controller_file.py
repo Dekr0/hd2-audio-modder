@@ -1,5 +1,7 @@
+import asyncio 
 import os
 import json
+import multiprocessing.pool as pool
 import shutil
 import subprocess
 import xml.etree.ElementTree as etree
@@ -10,14 +12,16 @@ from tkinter.filedialog import askopenfilename
 from tkinter.messagebox import showerror, showwarning
 from typing import Any, Literal, Union
 
+import media_util
+
 from const_global import language
-from const_global import CACHE, DEFAULT_CONVERSION_SETTING, DEFAULT_WWISE_PROJECT, \
-        FFMPEG, SYSTEM, VGMSTREAM, WWISE_CLI
+from const_global import CACHE, CACHE_WEM, DEFAULT_CONVERSION_SETTING, \
+                         DEFAULT_WWISE_PROJECT, FFMPEG, SYSTEM, VGMSTREAM, \
+                         WWISE_CLI
 from game_asset_entity import AudioSource
 from log import logger
 from parser import FileReader
 from ui_window_component import ProgressWindow
-
 
 class FileHandler:
 
@@ -193,41 +197,154 @@ class FileHandler:
                 progress_window.step()
 
         progress_window.destroy()
-    
-    def dump_all_as_wav(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
 
-        progress_window = ProgressWindow(title="Dumping Files", 
-                                         max_progress=len(self.file_reader.audio_sources))
-        progress_window.show()
+    async def _dump_all_as_wav_async(self, folder=""):
+        if not os.path.exists(folder):
+            folder = filedialog.askdirectory(title="Select folder to save files to")
         
         if not os.path.exists(folder):
-            logger.warning("Invalid folder selected, aborting dump")
-            progress_window.destroy()
+            logger.warning("Invalid folder selected. Aborting dump.")
             return
-        
+
         for bank in self.file_reader.wwise_banks.values():
             if bank.dep == None:
-                raise RuntimeError(f"Wwise Soundbank {bank.get_id} in {self.file_reader.path}"
-                                   " is missing Wwise dependency")
+                raise RuntimeError(
+                    f"Wwise Soundbank {bank.get_id} in {self.file_reader.path}"
+                     " is missing Wwise dependency")
 
-            subfolder = os.path.join(folder, 
-                                     os.path.basename(bank.dep.data.replace('\x00', '')))
+            basename = os.path.basename(bank.dep.data.replace('\x00', ''))
+
+            tmp_subfolder = os.path.join(CACHE_WEM, basename)
+            try:
+                if not os.path.exists(tmp_subfolder):
+                    os.mkdir(tmp_subfolder)
+            except OSError as err:
+                logger.error(f"Failed to create tmp stage area {tmp_subfolder}. "
+                             f"Error: {err}")
+            if not os.path.exists(tmp_subfolder):
+                continue
+                
+            subfolder = os.path.join(folder, basename)
+            try:
+                if not os.path.exists(subfolder):
+                    os.mkdir(subfolder)
+            except OSError as err:
+                logger.error(f"Failed to create {subfolder}. Error: {err}")
             if not os.path.exists(subfolder):
-                os.mkdir(subfolder)
-            for audio in bank.get_content():
-                save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wav")
-                with open(save_path+".wem", "wb") as f:
-                    f.write(audio.get_data())
-                process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
-                if process.returncode != 0:
-                    logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
-                os.remove(f"{save_path}.wem")
-                progress_window.step()
+                continue
 
-        progress_window.destroy()
+            for audio in bank.get_content():
+                source_id = str(audio.get_id())
+                # progress.set_text(f"Dumping {source_id}.wav")
+
+                rcode = await media_util.convert_wem_wav_buffer_async_v2(
+                    source_id,
+                    audio.get_data(),
+                    subfolder,
+                    tmp_subfolder,
+                )
+                if rcode != None and rcode != 0:
+                    logger.error(f"Failed to dump f{source_id}.wav: return code "
+                                 f"{rcode}")
+
+    def _dump_all_as_wav_thread(self, folder=""):
+        if not os.path.exists(folder):
+            folder = filedialog.askdirectory(title="Select folder to save files to")
         
+        if not os.path.exists(folder):
+            logger.warning("Invalid folder selected. Aborting dump.")
+            return
+
+        tasks: list[tuple[str, str, AudioSource]] = []
+
+        for bank in self.file_reader.wwise_banks.values():
+            if bank.dep == None:
+                raise RuntimeError(
+                    f"Wwise Soundbank {bank.get_id} in {self.file_reader.path}"
+                     " is missing Wwise dependency")
+
+            basename = os.path.basename(bank.dep.data.replace('\x00', ''))
+
+            tmp_subfolder = os.path.join(CACHE_WEM, basename)
+            try:
+                if not os.path.exists(tmp_subfolder):
+                    os.mkdir(tmp_subfolder)
+            except OSError as err:
+                logger.error(f"Failed to create tmp stage area {tmp_subfolder}. "
+                             f"Error: {err}")
+            if not os.path.exists(tmp_subfolder):
+                continue
+                
+            subfolder = os.path.join(folder, basename)
+            try:
+                if not os.path.exists(subfolder):
+                    os.mkdir(subfolder)
+            except OSError as err:
+                logger.error(f"Failed to create {subfolder}. Error: {err}")
+            if not os.path.exists(subfolder):
+                continue
+
+            if len(bank.get_content()) <= 0:
+                continue
+
+            tasks += [(tmp_subfolder, subfolder, audio) 
+                      for audio in bank.get_content()]
+
+        async def async_worker(load_start: int, load_end: int):
+            for i in range(load_start, load_end):
+                rcode = await media_util.convert_wem_wav_buffer_async_v2(
+                    str(tasks[i][2].get_id()),
+                    tasks[i][2].get_data(),
+                    tasks[i][1],
+                    tasks[i][0]
+                )
+                if rcode != None and rcode != 0:
+                    logger.error(f"Failed to dump f{tasks[i][2].get_id()}.wav: "
+                                 f"return code: {rcode}")
+
+        def worker(load_start: int, load_end: int):
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(async_worker(load_start, load_end))
+
+        nthread = 8 
+        with pool.ThreadPool(processes=nthread) as p:
+            tasks_per_thread = len(tasks) // nthread
+            remainder = len(tasks) % nthread
+            end = 0
+            for i in range(nthread):
+                tasks_assigned = tasks_per_thread + 1 if i < remainder \
+                                                      else tasks_per_thread 
+                start = end
+                end = start + tasks_assigned
+                p.apply_async(
+                    worker, [start, end],
+                    error_callback=lambda err: logger.error(err)
+                ).get()
+            p.close()
+            p.join()
+
+    def dump_all_as_wav(self, folder=""):
+        sentinel = True
+        try:
+            os.mkdir(CACHE_WEM, mode=0o777)
+        except OSError as err:
+            sentinel = False
+            logger.error("Failed to create tmp folder for staging during "
+                         f"conversion. Error: {err}")
+        if not sentinel:
+            logger.error("Aborting dumping.")
+            return
+
+        # Threading
+        self._dump_all_as_wav_thread(folder)
+        # Asyncio
+        asyncio.run(self._dump_all_as_wav_async(folder))
+        try:
+            shutil.rmtree(CACHE_WEM)
+        except OSError as err:
+            logger.error("Failed to remove tmp folder for staging during "
+                         f"conversion. Error: {err}")
+
     def get_number_prefix(self, n):
         number = ''.join(takewhile(str.isdigit, n or ""))
         try:
