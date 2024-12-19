@@ -9,8 +9,8 @@ from tkinter.messagebox import showwarning
 from tkinter.messagebox import showerror
 
 from const_global import GAME_FILE_LOCATION, language_lookup
-from const_global import CACHE, DEFAULT_WWISE_PROJECT, SYSTEM, VGMSTREAM, \
-        WWISE_CLI
+from const_global import CACHE, CACHE_WEM, DEFAULT_WWISE_PROJECT, SYSTEM, \
+                         VGMSTREAM, WWISE_CLI
 from log import logger
 from ui_main_window import MainWindow
 from ui_controller_file import FileHandler
@@ -27,6 +27,8 @@ if __name__ == "__main__":
     try:
         if not os.path.exists(CACHE):
             os.mkdir(CACHE, mode=0o777)
+        if not os.path.exists(CACHE_WEM):
+            os.mkdir(CACHE_WEM, mode=0o777)
     except Exception as e:
         showerror("Error when initiating application", 
                     "Failed to create application caching space")
