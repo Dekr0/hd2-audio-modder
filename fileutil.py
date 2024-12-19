@@ -65,3 +65,7 @@ def std_path(p: str):
             return pathlib.PurePosixPath(p).as_uri()
         case _:
             return pathlib.Path(p).as_uri()
+
+async def write(path: str, buffer: bytes | bytearray):
+    with open(path, "wb") as f:
+        f.write(buffer)
