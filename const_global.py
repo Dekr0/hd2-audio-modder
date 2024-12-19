@@ -50,7 +50,7 @@ CACHE = os.path.join(DIR, ".cache")
 CACHE_WEM = os.path.join(CACHE, "wem")
 
 DEFAULT_WWISE_PROJECT = os.path.join(
-        DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
+    DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj")
 
 FFMPEG = ""
 SYSTEM = platform.system()
