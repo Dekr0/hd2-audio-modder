@@ -367,7 +367,7 @@ class FileHandler:
         for source in self.file_reader.audio_sources.values(): # resource_id
             if source.resource_id == file_id:
                 return source
-        logger.error(f"{file_id} has no actual audio source in "
+        logger.debug(f"{file_id} has no actual audio source in "
                      f"{self.file_reader.path}.")
         return None
                 
