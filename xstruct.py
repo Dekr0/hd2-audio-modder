@@ -11,6 +11,14 @@ class MemoryStream:
         self.io_mode = io_mode
         self.endian = "<"
 
+    def advance(self, offset: int):
+        self.location += offset
+        if self.location < 0:
+            self.location = 0
+        if self.location > len(self.data):
+            missing_bytes = self.location - len(self.data)
+            self.data += bytearray(missing_bytes)
+
     def open(self, Data, io_mode = "read"): # Open Stream
         self.data = bytearray(Data)
         self.io_mode = io_mode
