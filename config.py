@@ -13,16 +13,18 @@ class Separator:
                  uid: str, 
                  label: str, 
                  parent_entry_id: str, 
+                 top_level_parent_entry_id: str,
                  view_mode: str,
                  entry_ids: set[str]):
         self.uid = uid
         self.label = label
+        self.top_lv_parent_entry_id = top_level_parent_entry_id 
         self.parent_entry_id = parent_entry_id
         self.view_mode = view_mode
         self.entry_ids = entry_ids
 
     def __str__(self):
-        return "\n".join([self.uid, self.label, self.parent_entry_id, *self.entry_ids])
+        return "\n".join([self.uid, self.label, self.parent_entry_id, self.top_lv_parent_entry_id, *self.entry_ids, "\n"])
 
 """
 Data class to encapsulate relationship of separators across archives and 
@@ -81,6 +83,7 @@ class Config:
                       view_mode: str,
                       archive_path: str, 
                       parent_id: str, 
+                      top_level_parent_entry_id: str,
                       entries: set[str]):
         uid = uuid.uuid4().hex
 
@@ -95,7 +98,14 @@ class Config:
             logger.error("Hash collision when creating a new separator!"
                          " Collision in archive namespace")
 
-        separator = Separator(uid, label, parent_id, view_mode, entries)
+        separator = Separator(
+            uid, 
+            label, 
+            parent_id, 
+            top_level_parent_entry_id,
+            view_mode, 
+            entries
+        )
 
         self.separators_db.separators[uid] = separator
         self.separators_db.archive_namespace[archive_path].add(uid)
