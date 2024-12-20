@@ -97,16 +97,16 @@ class FileReader:
             toc_file.write(unk.to_bytes(4, byteorder='little'))
             
         if len(self.text_banks) > 0:
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = STRING
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.text_banks)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
+           unk = 0
+           toc_file.write(unk.to_bytes(8, byteorder='little'))
+           unk = STRING
+           toc_file.write(unk.to_bytes(8, byteorder='little'))
+           unk = len(self.text_banks)
+           toc_file.write(unk.to_bytes(8, byteorder='little'))
+           unk = 16
+           toc_file.write(unk.to_bytes(4, byteorder='little'))
+           unk = 64
+           toc_file.write(unk.to_bytes(4, byteorder='little'))
         
         file_position = toc_file.tell()
         for key in self.wwise_streams.keys():
@@ -335,6 +335,7 @@ class FileReader:
                            continue
                        audio = AudioSource()
                        audio.stream_type = BANK
+                       audio.hierarchy_id = entry.hierarchy_id 
                        audio.short_id = source.source_id
                        audio.set_data(media_index.data[source.source_id], 
                                       set_modified=False, 
@@ -360,6 +361,7 @@ class FileReader:
                             continue
 
                         audio.short_id = source.source_id
+                        audio.hierarchy_id = entry.hierarchy_id
                         self.audio_sources[source.source_id] = audio
 
                 for info in entry.track_info:
