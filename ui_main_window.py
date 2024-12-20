@@ -1076,6 +1076,80 @@ class MainWindow:
         self.search_label['text'] = ""
         self.search_text_var.set("")
 
+    def _inject_label(self, unique_audio_sources: set[int]):
+        if self.database != None:
+            labels = self.database.get_sound_label_by_source_id_view_many(
+                list(unique_audio_sources)
+            )
+            for source_id, label in labels.items():
+                entry_view_ids = self.treeview.tag_has(source_id)
+                if len(entry_view_ids) <= 0:
+                    # logger.warning(f"No tree entry associated with {source_id}")
+                    continue
+                for entry_view_id in entry_view_ids:
+                    values = self.get_entry_values(entry_view_id)
+                    self.treeview.item(entry_view_id, values=(values[0], label))
+                values = self.get_entry_values(entry_view_ids[0])
+
+    def _inject_separator(self, active_archive: str):
+        seps = self.app_state.separators_db.separators
+        active_sep_uids = self.app_state \
+                              .separators_db \
+                              .archive_namespace[active_archive]
+
+        # dict[separator_uid, treeview_view_id]
+        sep_entries: dict[str, str] = {}
+        for uid in active_sep_uids:
+            if uid not in seps:
+                logger.warning(f"Separator UID {uid} has no actual separator")
+                self.app_state.remove_separator(uid)
+                continue
+            if seps[uid].view_mode != self.selected_view.get():
+                continue
+            sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
+
+        for uid, sep_entry in sep_entries.items():
+            parent_entry_id = seps[uid].parent_entry_id
+
+            if parent_entry_id != "":
+                parent_view_id = self.treeview.tag_has(parent_entry_id)
+                if len(parent_view_id) == 0:
+                    raise RuntimeError(f"No treeview entry has tag {parent_entry_id}.")
+                if len(parent_view_id) > 1:
+                    raise RuntimeError(f"Tag {parent_entry_id} is not unique.")
+                self.treeview.detach(sep_entry)
+                self.treeview.move(sep_entry, parent_view_id[0], 0)
+                
+            for entry_id in seps[uid].entry_ids:
+                children_view_id = self.treeview.tag_has(entry_id)
+                if len(children_view_id) == 0:
+                    raise RuntimeError(f"No treeview entry has tag {entry_id}.")
+                if len(children_view_id) == 1:
+                    self.treeview.detach(children_view_id[0])
+                    self.treeview.move(children_view_id[0], sep_entry, 0)
+
+                correct_child_view_id: str | None = None
+                for child_view_id in children_view_id:
+                    top_lv_parent_view_id = self._resolve_top_lv_parent(child_view_id) 
+                    if top_lv_parent_view_id == child_view_id:
+                        raise RuntimeError(
+                                "Conflict with constraint specified by Separator."
+                                "Children of a separator cannot have a parent of "
+                                "top level")
+                    top_lv_parent_entry_tags = self.get_entry_tags(top_lv_parent_view_id)
+                    if top_lv_parent_entry_tags[0] == seps[uid].top_lv_parent_entry_id:
+                        correct_child_view_id = child_view_id
+                        break
+
+                if correct_child_view_id == None:
+                    raise RuntimeError(f"Child with entry id {entry_id} does not"
+                                       f" associate with separator {uid}. No top "
+                                       "level parent entry id matches "
+                                       f"{seps[uid].top_lv_parent_entry_id}")
+
+                self.treeview.detach(correct_child_view_id)
+                self.treeview.move(correct_child_view_id, sep_entry, 0)
+
     def create_hierarchy_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
@@ -1179,7 +1253,7 @@ class MainWindow:
                 self.treeview.move(children_view_id[0], sep_entry, 0)
 
         self.check_modified()
-                
+
     def create_source_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
@@ -1221,57 +1295,13 @@ class MainWindow:
                         .file_reader
                         .string_entries[language][string_id], e)
 
-        if self.database != None:
-            labels = self.database.get_sound_label_by_source_id_view_many(
-                list(unique_audio_sources)
-            )
-            for source_id, label in labels.items():
-                entry_view_id = self.treeview.tag_has(source_id)
-                if len(entry_view_id) <= 0:
-                    raise RuntimeError(f"No tree entry associated with {source_id}")
-                if len(entry_view_id) > 1:
-                    raise RuntimeError(f"Source id {source_id} has more than one "
-                                       "tree view entry")
-                values = self.get_entry_values(entry_view_id[0])
-                self.treeview.item(entry_view_id[0], values=(values[0], label))
+        self._inject_label(unique_audio_sources)
 
         if active_archive not in self.app_state.separators_db.archive_namespace:
             self.check_modified()
             return
 
-        seps = self.app_state.separators_db.separators
-        active_sep_uids = self.app_state \
-                              .separators_db \
-                              .archive_namespace[active_archive]
-        # dict[separator_uid, treeview_view_id]
-        sep_entries: dict[str, str] = {}
-        for uid in active_sep_uids:
-            if uid not in seps:
-                logger.warning(f"Separator UID {uid} has no actual separator")
-                self.app_state.remove_separator(uid)
-                continue
-            if seps[uid].view_mode != self.selected_view.get():
-                continue
-            sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
-
-        for uid, sep_entry in sep_entries.items():
-            parent_entry_id = seps[uid].parent_entry_id
-            if parent_entry_id != "":
-                parent_view_id = self.treeview.tag_has(parent_entry_id)
-                if len(parent_view_id) == 0:
-                    raise RuntimeError(f"No treeview entry has tag {parent_entry_id}.")
-                if len(parent_view_id) > 1:
-                    raise RuntimeError(f"Tag {parent_entry_id} is not unique.")
-                self.treeview.detach(sep_entry)
-                self.treeview.move(sep_entry, parent_view_id[0], 0)
-            for entry_id in seps[uid].entry_ids:
-                children_view_id = self.treeview.tag_has(entry_id)
-                if len(children_view_id) == 0:
-                    raise RuntimeError(f"No treeview entry has tag {entry_id}.")
-                if len(children_view_id) > 1:
-                    raise RuntimeError(f"Tag {entry_id} is not unique.")
-                self.treeview.detach(children_view_id[0])
-                self.treeview.move(children_view_id[0], sep_entry, 0)
+        self._inject_separator(active_archive)
 
         self.check_modified()
                 
@@ -1458,6 +1488,14 @@ class MainWindow:
         self.check_modified()
         self.show_info_window()
 
+    def _resolve_top_lv_parent(self, entry_view_id: str) -> str:
+        prev_parent_view_id = entry_view_id
+        curr_parent_view_id = self.treeview.parent(prev_parent_view_id)
+        while curr_parent_view_id != "":
+            prev_parent_view_id = curr_parent_view_id
+            curr_parent_view_id = self.treeview.parent(curr_parent_view_id)
+        return prev_parent_view_id
+
     """
     Assumption
     - A separator can include any entry type as its children except Soundbank and Textbank
@@ -1511,6 +1549,13 @@ class MainWindow:
         if label == None:
             return
 
+        top_lv_parent_view_id = self._resolve_top_lv_parent(selects[0])
+        if top_lv_parent_view_id == selects[0]:
+            raise RuntimeError("Conflict with constraint specified by Separator."
+                               "Children of a separator cannot have a parent of "
+                               "top level")
+        top_lv_parent_entry_tags = self.get_entry_tags(top_lv_parent_view_id)
+
         parent_entry_tags = self.get_entry_tags(parent_view_id)
         # invariant checking
 
@@ -1519,6 +1564,7 @@ class MainWindow:
             self.selected_view.get(),
             std_path(self.file_handler.file_reader.path),
             parent_entry_tags[0],
+            top_lv_parent_entry_tags[0],
             entry_ids
         )
         if sep_uid == "":
