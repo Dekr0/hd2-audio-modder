@@ -24,12 +24,12 @@ import fileutil
 from const_global import language, language_lookup, LANGUAGE_MAPPING
 from const_global import CACHE, GAME_FILE_LOCATION, VGMSTREAM, WWISE_CLI, VORBIS
 
-from game_asset_entity import AudioSource, HircEntry, MusicSegment, MusicTrack, StringEntry, \
-        Sound, TextBank, TrackInfoStruct, WwiseBank
+from game_asset_entity import AudioSource, HircEntry, MusicSegment, MusicTrack, \
+                              RandomSequenceContainer, Sound, StringEntry, \
+                              TextBank, TrackInfoStruct, WwiseBank
 from fileutil import list_files_recursive, std_path
 from log import logger
 
-# from ui_archive_search import ArchiveSearch
 from ui_controller_file import FileHandler
 from ui_controller_sound import SoundHandler
 from ui_controller_workspace import WorkspaceEventHandler
@@ -56,6 +56,7 @@ class MainWindow:
     ENTRY_TYPE_EVENT = "Event"
     ENTRY_TYPE_MUSIC_SEGMENT = "Music Segment"
     ENTRY_TYPE_MUSIC_TRACK = "Music Track"
+    ENTRY_TYPE_RANDOM_SEQUENCE_CONTAINER = "Random Sequence"
     ENTRY_TYPE_SOUND_BANK = "Sound Bank"
     ENTRY_TYPE_SEPARATOR = "Separator"
     ENTRY_TYPE_STRING = "String"
@@ -306,17 +307,17 @@ class MainWindow:
         self.treeview_scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
         self.treeview = ttk.Treeview(
                 self.treeview_panel, 
-                columns=("type","label",), 
+                columns=("type", "label"), 
                 height=WINDOW_HEIGHT-100)
         self.treeview_scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
         self.treeview.pack(side="right", padx=8, pady=8, fill="x", expand=True)
 
         self.treeview.heading("#0", text="File")
         self.treeview.column("#0", width=250)
-        self.treeview.heading("type", text="Type")
-        self.treeview.column("type", width=100)
         self.treeview.heading("label", text="Label")
         self.treeview.column("label", width=300)
+        self.treeview.heading("type", text="Type")
+        self.treeview.column("type", width=100)
 
         self.treeview.configure(yscrollcommand=self.treeview_scroll_bar.set)
         self.treeview.bind("<<TreeviewSelect>>", self.show_info_window)
@@ -392,8 +393,8 @@ class MainWindow:
         self.app_state.theme = theme
         self.workspace.column("#0", width=256+16)
         self.treeview.column("#0", width=250)
-        self.treeview.column("type", width=100)
         self.treeview.column("label", width=300)
+        self.treeview.column("type", width=100)
         self.check_modified()
         
     def get_colors(self, modified=False):
@@ -667,7 +668,7 @@ class MainWindow:
         is_single = len(selects) == 1
         can_sep = True
         is_sep = False
-        add_audio = True
+        allow_dump = True
 
         if is_single:
             values = self.get_entry_values(selects[0])
@@ -677,15 +678,15 @@ class MainWindow:
         for select in selects:
             values = self.treeview.item(select, option="values")
             if values[0] != MainWindow.ENTRY_TYPE_AUDIO_SOURCE:
-                add_audio = False
+                allow_dump = False
             if parent_view_id != self.treeview.parent(select) or \
                values[0] == MainWindow.ENTRY_TYPE_SOUND_BANK or \
                values[0] == MainWindow.ENTRY_TYPE_TEXT_BANK:
                 can_sep = False
-            if not add_audio and not can_sep:
+            if not allow_dump and not can_sep:
                 break
                 
-        return (is_single, can_sep, is_sep, add_audio)
+        return (is_single, can_sep, is_sep, allow_dump)
 
     def _treeview_menu_add_audio_export(self, is_single_select: bool):
         self.right_click_menu.add_command(
@@ -735,16 +736,21 @@ class MainWindow:
             )
 
             self.right_click_menu.add_command(
-                label="Generate specification file",
+                label="Generate specification",
                 command=self.generate_sepcfication,
             )
-            
+
+            self.right_click_menu.add_command(
+                label="Label Entry",
+                command=lambda: self.label_entry(selects[0]) if enable[0] else \
+                                self.label_entry_batches(selects)
+            )
+
             if enable[1]:
                 self.right_click_menu.add_command(
                     label=("Create Separator"),
                     command=lambda: self.create_separator(selects)
                 )
-
             if enable[2]:
                 self.right_click_menu.add_command(
                     label=("Rename Separator"),
@@ -756,10 +762,6 @@ class MainWindow:
                 )
 
             enable[3] and self._treeview_menu_add_audio_export(enable[0]) # type: ignore
-            enable[3] and self.right_click_menu.add_command( # type: ignore
-                label=("Label Audio Source" if enable[0] else "Label Audio Sources"),
-                command=lambda: self.label_audio_source(selects)
-            )
 
             self.right_click_menu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
@@ -1003,14 +1005,30 @@ class MainWindow:
     def get_entry_values(self, view_id: str):
         values = self.treeview.item(view_id, option="values")
         if len(values) <= 0:
-            raise RuntimeError("A treeview entry without values")
+            raise RuntimeError(f"Treeview entry {view_id} has no values")
         return values
 
     def get_entry_tags(self, view_id: str):
         tags = self.treeview.item(view_id, option="tags")
         if len(tags) <= 0:
-            raise RuntimeError("A treeview entry without tags")
+            raise RuntimeError(f"Treeview entry {view_id} has no tags")
         return tags
+
+    def get_entry_tag_id(self, view_id: str):
+        tags = self.get_entry_tags(view_id)
+        return tags if tags == "" else tags[0]
+
+    def get_entry_label(self, view_id: str):
+        values = self.get_entry_values(view_id)
+        if values == "":
+            return ""
+        if len(values) < 2:
+            raise RuntimeError(f"Treeview entry {view_id} has no label")
+        return values[1]
+
+    def get_entry_type(self, view_id: str):
+        values = self.get_entry_values(view_id)
+        return values if values == "" else values[0] 
 
     """
     Each entry has the following properties
@@ -1053,6 +1071,9 @@ class MainWindow:
         elif isinstance(entry, StringEntry):
             entry_type = MainWindow.ENTRY_TYPE_STRING
             name = entry.get_text()[:20]
+        elif isinstance(entry, RandomSequenceContainer):
+            entry_type = MainWindow.ENTRY_TYPE_RANDOM_SEQUENCE_CONTAINER 
+            name = f"Sequence {entry.get_id()}"
         elif isinstance(entry, TextBank):
             entry_type = MainWindow.ENTRY_TYPE_TEXT_BANK 
             name = f"{entry.get_id()}.text"
@@ -1076,20 +1097,38 @@ class MainWindow:
         self.search_label['text'] = ""
         self.search_text_var.set("")
 
-    def _inject_label(self, unique_audio_sources: set[int]):
-        if self.database != None:
-            labels = self.database.get_sound_label_by_source_id_view_many(
-                list(unique_audio_sources)
-            )
-            for source_id, label in labels.items():
-                entry_view_ids = self.treeview.tag_has(source_id)
-                if len(entry_view_ids) <= 0:
-                    # logger.warning(f"No tree entry associated with {source_id}")
-                    continue
-                for entry_view_id in entry_view_ids:
-                    values = self.get_entry_values(entry_view_id)
-                    self.treeview.item(entry_view_id, values=(values[0], label))
-                values = self.get_entry_values(entry_view_ids[0])
+    def _inject_audio_source_label(self, unique_audio_source_ids: set[int]):
+        if self.database == None:
+            return
+
+        labels = self.database.get_sound_label_by_source_id_view_many(
+            [str(i) for i in unique_audio_source_ids]
+        )
+        for source_id, label in labels.items():
+            entry_view_ids = self.treeview.tag_has(source_id)
+            if len(entry_view_ids) <= 0:
+                logger.debug(f"No tree entry associated with {source_id}")
+                continue
+            for entry_view_id in entry_view_ids:
+                values = self.get_entry_values(entry_view_id)
+                self.treeview.item(entry_view_id, values=(values[0], label))
+            values = self.get_entry_values(entry_view_ids[0])
+
+    def _inject_random_seq_cntr_label(
+            self, unique_random_seq_cntr_ids: set[int]):
+        if self.database == None:
+            return
+        labels = self.database.get_random_seq_cntr_label_view_by_obj_id_many(
+                [str(i) for i in unique_random_seq_cntr_ids])
+        for wwise_object_id, label in labels.items():
+            entry_view_ids = self.treeview.tag_has(wwise_object_id)
+            if len(entry_view_ids) <= 0:
+                logger.debug(f"No tree entry associated with {wwise_object_id}")
+                continue
+            for entry_view_id in entry_view_ids:
+                values = self.get_entry_values(entry_view_id)
+                self.treeview.item(entry_view_id, values=(values[0], label))
+            values = self.get_entry_values(entry_view_ids[0])
 
     def _inject_separator(self, active_archive: str):
         seps = self.app_state.separators_db.separators
@@ -1097,6 +1136,9 @@ class MainWindow:
                               .separators_db \
                               .archive_namespace[active_archive]
 
+        """
+        Layout all separators first since separators can be nested
+        """
         # dict[separator_uid, treeview_view_id]
         sep_entries: dict[str, str] = {}
         for uid in active_sep_uids:
@@ -1108,6 +1150,12 @@ class MainWindow:
                 continue
             sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
 
+        """
+        Rearrange items for separators. The current implementation will cause 
+        all separators appear in the beginning of its parent. It can be either 
+        good or bad. (Good is that organize items are all in the front. Bad is 
+        that items will be out of order than the usual arrangement.)
+        """
         for uid, sep_entry in sep_entries.items():
             parent_entry_id = seps[uid].parent_entry_id
 
@@ -1153,104 +1201,106 @@ class MainWindow:
     def create_hierarchy_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
-        self.app_state.view_mode = "HierarchyView"
 
         active_archive = std_path(self.file_handler.file_reader.path)
         banks = self.file_handler.get_wwise_banks()
+        unique_audio_source_ids: set[int] = set()
+        unique_random_seq_cntr_ids: set[int] = set()
+        sequence_sounds: set[Sound] = set()
         for bank in banks.values():
-            bank_entry = self.create_treeview_entry(bank)
-
             if bank.hierarchy == None:
-                raise RuntimeError(f"Wwise Soundbank {bank.get_id} in {active_archive}"
-                                   "is missing hirearchy data.")
+                raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {active_archive}"
+                                   " is missing hierarchy data")
 
+            bank_entry = self.create_treeview_entry(bank)
+            
             for hierarchy_entry in bank.hierarchy.entries.values():
                 if isinstance(hierarchy_entry, MusicSegment):
-                    segment_entry = self.create_treeview_entry(hierarchy_entry, 
-                                                               bank_entry)
+                    segemnet_entry = self.create_treeview_entry(hierarchy_entry,
+                                                                bank_entry)
+
                     for track_id in hierarchy_entry.tracks:
                         track = bank.hierarchy.entries[track_id]
-                        track_entry = self.create_treeview_entry(track, segment_entry)
-
-                        for source in track.sources:
-                            if source.plugin_id != VORBIS:
+                        track_entry = self.create_treeview_entry(track, 
+                                                                 segemnet_entry)
+                        for source_struct in track.sources:
+                            if source_struct.plugin_id != VORBIS:
                                 continue
-                            self.create_treeview_entry(
-                                self.file_handler
-                                    .get_audio_by_id(source.source_id), track_entry)
-
+                            audio_source = self.file_handler.get_audio_by_id(
+                                    source_struct.source_id)
+                            if audio_source == None:
+                                continue
+                            self.create_treeview_entry(audio_source, track_entry)
+                        
                         for info in track.track_info:
                             if info.event_id == 0:
                                 continue
-                            self.create_treeview_entry(info, track_entry)
-                elif isinstance(hierarchy_entry, Sound):
-                    if hierarchy_entry.sources[0].plugin_id != VORBIS:
-                        continue
-                    self.create_treeview_entry(
-                        self.file_handler
-                            .get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
+                            self.create_treeview_entry(info,track_entry)
+                elif isinstance(hierarchy_entry, RandomSequenceContainer):
+                    container_entry = self.create_treeview_entry(hierarchy_entry,
+                                                                 bank_entry)
+                    for entry_id in hierarchy_entry.contents:
+                        entry = bank.hierarchy.entries[entry_id]
+                        if not isinstance(entry, Sound):
+                            logger.info(f"Entry {entry_id} is not a Sound object"
+                                        " in random sequence container "
+                                        f"{hierarchy_entry.get_id()}.")
+                            continue
+                        
+                        if len(entry.sources) <= 0 or \
+                           entry.sources[0].plugin_id != VORBIS:
+                            continue
+
+                        sequence_sounds.add(entry)
+
+                        audio_source = self.file_handler.get_audio_by_id(
+                                entry.sources[0].source_id)
+                        if audio_source == None:
+                            continue
+                        self.create_treeview_entry(audio_source, container_entry)
+                        unique_audio_source_ids.add(entry.sources[0].source_id)
+                    unique_random_seq_cntr_ids.add(hierarchy_entry.get_id())
+            for hierarchy_entry in bank.hierarchy.entries.values():
+                if not isinstance(hierarchy_entry, Sound) or \
+                   hierarchy_entry in sequence_sounds:
+                    continue
+                audio_source = self.file_handler.get_audio_by_id(hierarchy_entry.
+                                                                 sources[0].
+                                                                 source_id)
+                if audio_source == None:
+                    continue
+
+                self.create_treeview_entry(audio_source, bank_entry)
+                unique_audio_source_ids.add(hierarchy_entry.sources[0].source_id)
 
         for entry in self.file_handler.file_reader.text_banks.values():
             if entry.language != language:
                 continue
             e = self.create_treeview_entry(entry)
             for string_id in entry.string_ids:
+                if language not in self.file_handler.file_reader.string_entries:
+                    logger.warning(f"Language {language} does not have available"
+                                   "string entries")
+                    continue
+                if string_id not in self.file_handler \
+                                        .file_reader \
+                                        .string_entries[language]:
+                    logger.warning(f"String ID {string_id} have no actual string"
+                                   "entry.")
+                    continue
                 self.create_treeview_entry(self.file_handler
                                                .file_reader
-                                               .string_entries[language][string_id], e)
+                                               .string_entries[language][string_id],
+                                           e)
 
-        """
-        Since the concept of separator is foregin to Wwise Soundbank, children 
-        of separators is much easier to arranage after all entries in the Wwise 
-        Soundbank are layout.
-        """
+        self._inject_audio_source_label(unique_audio_source_ids)
+        self._inject_random_seq_cntr_label(unique_random_seq_cntr_ids)
+
         if active_archive not in self.app_state.separators_db.archive_namespace:
             self.check_modified()
             return
 
-
-        seps = self.app_state.separators_db.separators
-        active_sep_uids = self.app_state \
-                              .separators_db \
-                              .archive_namespace[active_archive]
-        # dict[separator_uid, treeview_view_id]
-        sep_entries: dict[str, str] = {}
-        """
-        Layout all separators first since separators can be nested
-        """
-        for uid in active_sep_uids:
-            if uid not in seps:
-                logger.warning(f"Separator UID {uid} has no actual separator")
-                self.app_state.remove_separator(uid)
-                continue
-            if seps[uid].view_mode != self.selected_view.get():
-                continue
-            sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
-
-        """
-        Rearrange items for separators. The current implementation will cause 
-        all separators appear in the beginning of its parent. It can be either 
-        good or bad. (Good is that organize items are all in the front. Bad is 
-        that items will be out of order than the usual arrangement.)
-        """
-        for uid, sep_entry in sep_entries.items():
-            parent_entry_id = seps[uid].parent_entry_id
-            if parent_entry_id != "":
-                parent_view_id = self.treeview.tag_has(parent_entry_id)
-                if len(parent_view_id) == 0:
-                    raise RuntimeError(f"No treeview entry has tag {parent_entry_id}.")
-                if len(parent_view_id) > 1:
-                    raise RuntimeError(f"Tag {parent_entry_id} is not unique.")
-                self.treeview.detach(sep_entry)
-                self.treeview.move(sep_entry, parent_view_id[0], 0)
-            for entry_id in seps[uid].entry_ids:
-                children_view_id = self.treeview.tag_has(entry_id)
-                if len(children_view_id) == 0:
-                    raise RuntimeError(f"No treeview entry has tag {entry_id}.")
-                if len(children_view_id) > 1:
-                    raise RuntimeError(f"Tag {entry_id} is not unique.")
-                self.treeview.detach(children_view_id[0])
-                self.treeview.move(children_view_id[0], sep_entry, 0)
+        self._inject_separator(active_archive)
 
         self.check_modified()
 
@@ -1259,8 +1309,8 @@ class MainWindow:
         self.treeview.delete(*self.treeview.get_children())
         self.app_state.view_mode = "SourceView"
 
-        unique_audio_sources: set[int] = set()
-        existing_audio_sources: set[int] = set()
+        unique_audio_source_ids: set[int] = set()
+        existing_audio_source_ids: set[int] = set()
         banks = self.file_handler.get_wwise_banks()
         active_archive = std_path(self.file_handler.file_reader.path)
         for bank in banks.values():
@@ -1268,22 +1318,22 @@ class MainWindow:
                 raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {active_archive}"
                                    " is missing hierarchy data")
 
-            existing_audio_sources.clear()
+            existing_audio_source_ids.clear()
             bank_entry = self.create_treeview_entry(bank)
 
             for hierarchy_entry in bank.hierarchy.entries.values():
                 for source in hierarchy_entry.sources:
                     if source.plugin_id != VORBIS or \
-                       source.source_id in existing_audio_sources:
+                       source.source_id in existing_audio_source_ids:
                            continue
 
-                    existing_audio_sources.add(source.source_id)
+                    existing_audio_source_ids.add(source.source_id)
 
                     audio_source = self.file_handler.get_audio_by_id(source.source_id)
                     if audio_source == None:
                         continue
                     self.create_treeview_entry(audio_source, bank_entry)
-                    unique_audio_sources.add(source.source_id)
+                    unique_audio_source_ids.add(source.source_id)
 
         for entry in self.file_handler.file_reader.text_banks.values():
             if entry.language != language:
@@ -1295,7 +1345,7 @@ class MainWindow:
                         .file_reader
                         .string_entries[language][string_id], e)
 
-        self._inject_label(unique_audio_sources)
+        self._inject_audio_source_label(unique_audio_source_ids)
 
         if active_archive not in self.app_state.separators_db.archive_namespace:
             self.check_modified()
@@ -1612,7 +1662,48 @@ class MainWindow:
         self.app_state.rename_separator(tags[0], label)
         self.treeview.item(sep_view_id, text=label)
 
-    def label_audio_source(self, audio_source_view_ids: tuple[str]):
+    def label_entry(self, entry_view_id: str):
+        if self.database == None:
+            logger.warning("No database is attached with audio modding tool"
+                           "Abort.")
+            return
+        entry_tag_id = self.get_entry_tag_id(entry_view_id)
+        t = self.get_entry_type(entry_view_id)
+
+        match(t):
+            case MainWindow.ENTRY_TYPE_AUDIO_SOURCE:
+                label = simpledialog.askstring("Label Random Sequence",
+                                               "Enter a label")
+                if label == None:
+                    return
+
+                try:
+                    self.database \
+                        .update_sound_label_by_source_id(label, entry_tag_id)
+                except sqlite3.OperationalError as err:
+                    logger.error(f"Failed to update sound label: {err}")
+                self.treeview.item(entry_view_id, values=(t, label))
+            case MainWindow.ENTRY_TYPE_RANDOM_SEQUENCE_CONTAINER:
+                label = simpledialog.askstring("Label Random Sequence",
+                                               "Enter a label")
+                if label == None:
+                    return
+                try:
+                    db_ids = self.database \
+                                 .get_random_seq_cntr_db_id_by_object_id(entry_tag_id)
+                    if len(db_ids) == 0:
+                        self.database \
+                            .insert_random_seq_cntr(label, entry_tag_id, "", set())
+                    else:
+                        self.database \
+                            .update_random_seq_cntr_label_by_object_id(label, entry_tag_id)
+                except sqlite3.OperationalError as err:
+                    logger.error(f"Failed to update random sequence label: {err}")
+                self.treeview.item(entry_view_id, values=(t, label))
+            case _:
+                showwarning(f"Labeling for entry type {t} is not supported")
+
+    def label_entry_batches(self, entry_view_ids: tuple[str]):
         if self.database == None:
             logger.warning("No database is attached with audio modding tool"
                            "Abort.")
@@ -1630,11 +1721,12 @@ class MainWindow:
         invariant: dict[str, tuple[str, str]] = {}
         # list[tuple[entry_view_id, entry_label]]
         entries: list[tuple[str, str]] = []
-        for audio_source_view_id in audio_source_view_ids:
-            values = self.get_entry_values(audio_source_view_id)
-            entry_id = self.get_entry_tags(audio_source_view_id)[0]
-            invariant[entry_id] = (audio_source_view_id, values[0])
-            entries.append((entry_id, values[1]))
+        for entry_view_id in entry_view_ids:
+            t = self.get_entry_type(entry_view_id)
+            label = self.get_entry_label(entry_view_id)
+            entry_id = self.get_entry_tags(entry_view_id)[0]
+            invariant[entry_id] = (entry_view_id, t)
+            entries.append((entry_id, label))
 
         buffer += "\n".join([f"{entry[0]}: \"{entry[1]}\"" for entry in entries])
 
@@ -1665,13 +1757,35 @@ class MainWindow:
                 reqs.append((splits[1].strip().replace("\"", ""), splits[0]))
         
         try:
-            self.database.update_sound_label_by_source_id_many(reqs)
-            os.remove(tmp)
             for req in reqs:
-                self.treeview.item(
-                    invariant[req[1]][0],
-                    values=(invariant[req[1]][1], req[0]),
-                )
+                match(invariant[req[1]][1]):
+                    case MainWindow.ENTRY_TYPE_AUDIO_SOURCE:
+                        self.database.update_sound_label_by_source_id(*req)
+                        self.treeview \
+                            .item(
+                                invariant[req[1]][0],
+                                values=(invariant[req[1]][1], req[0])
+                            )
+                    case MainWindow.ENTRY_TYPE_RANDOM_SEQUENCE_CONTAINER:
+                        db_id = self.database \
+                                    .get_random_seq_cntr_db_id_by_object_id(req[1])
+                        if len(db_id) == 0:
+                            self.database \
+                                .insert_random_seq_cntr(
+                                    req[0], req[1], "", set()
+                                )
+                        else:
+                            self.database \
+                                .update_random_seq_cntr_label_by_object_id(
+                                     req[0], req[1]
+                                )
+                        self.treeview \
+                            .item(
+                                invariant[req[1]][0],
+                                values=(invariant[req[1]][1], req[0]),
+                            )
+            self.database.commit()
+            os.remove(tmp)
         except sqlite3.OperationalError as err:
             logger.error(f"Failed to update sound label: {err}")
         except OSError as err:

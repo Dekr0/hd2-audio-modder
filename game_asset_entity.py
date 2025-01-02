@@ -421,7 +421,9 @@ class WwiseStream(Subscriber):
 class HircEntry:
     
     def __init__(self):
-        self.size = self.hierarchy_type = self.hierarchy_id = 0
+        self.size: int = 0
+        self.hierarchy_type: int
+        self.hierarchy_id: int = 0
         self.misc: Literal[b""] | bytearray = b""
         self.sources: list[BankSourceStruct] = []
         self.track_info: list[TrackInfoStruct] = []
@@ -468,6 +470,8 @@ class HircEntryFactory:
         stream.seek(stream.tell()-1)
         if hierarchy_type == 2: # sound
             return Sound.from_memory_stream(stream)
+        elif hierarchy_type == 0x05:
+            return RandomSequenceContainer.from_memory_stream(stream)
         elif hierarchy_type == 11: # music track
             return MusicTrack.from_memory_stream(stream)
         elif hierarchy_type == 0x0A: # music segment
@@ -646,7 +650,7 @@ class MusicSegment(HircEntry):
 
     def __init__(self):
         super().__init__()
-        self.tracks = []
+        self.tracks: list[int] = []
         self.duration = 0
         self.entry_marker = None
         self.exit_marker = None
@@ -799,7 +803,71 @@ class Sound(HircEntry):
                            self.hierarchy_id, 
                            self.sources[0].get_data(), 
                            self.misc)
-        
+
+
+class RandomSequenceContainer(HircEntry):
+    def __init__(self):
+        super().__init__()
+        self.unused_sections = []
+        self.contents: list[int] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream):
+        entry = RandomSequenceContainer()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        start_position = stream.tell()
+        entry.hierarchy_id = stream.uint32_read()
+
+        # ---------------------------------------
+        section_start = stream.tell()
+        stream.advance(1)
+        n = stream.uint8_read() #num fx
+        if n == 0:
+            stream.advance(12)
+        else:
+            stream.advance(7*n + 13)
+        stream.advance(5*stream.uint8_read()) #number of props
+        stream.advance(9*stream.uint8_read()) #number of props (again)
+        if stream.uint8_read() & 0b0000_0010: #positioning bit vector
+            if stream.uint8_read() & 0b0100_0000: # relative pathing bit vector
+                stream.advance(5)
+                stream.advance(16*stream.uint32_read())
+                stream.advance(20*stream.uint32_read())
+        if stream.uint8_read() & 0b0000_1000: #I forget what this is for
+            stream.advance(26)
+        else:
+           stream.advance(10)
+        stream.advance(3*stream.uint8_read()) #num state props
+        for _ in range(stream.uint8_read()): #num state groups
+            stream.advance(5)
+            stream.advance(8*stream.uint8_read())
+        for _ in range(stream.uint16_read()):  # num RTPC
+            stream.advance(12)
+            stream.advance(stream.uint16_read()*12)
+        section_end = stream.tell()
+        # ---------------------------------------
+
+        stream.seek(section_start)
+        entry.unused_sections.append(stream.read(section_end-section_start+24))
+
+        for _ in range(stream.uint32_read()): # number of children (tracks)
+            entry.contents.append(stream.uint32_read())
+
+        entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
+        return entry
+
+    def get_data(self):
+        return (
+            b"".join([
+                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
+                self.unused_sections[0],
+                len(self.contents).to_bytes(4, byteorder="little"),
+                b"".join([x.to_bytes(4, byteorder="little") for x in self.contents]),
+                self.unused_sections[1]
+            ])
+        )        
+
 
 class StringEntry:
 

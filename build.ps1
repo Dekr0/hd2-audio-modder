@@ -1,6 +1,6 @@
 . .\.venv\Scripts\Activate.ps1
 
-pyinstaller .\audio_modder.py --onefile
+pyinstaller .\audio_modder.py --onefile --add-data
 
 cp .\azure.tcl .\dist
 cp -r .\theme .\dist
