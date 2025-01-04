@@ -6,11 +6,11 @@ handle.
 from referencing.jsonschema import Schema
 
 
-VERSION = 2
+VERSION = 3
 
 
 revert_schema: Schema = {
-    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/revert",
+    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/target_import/revert",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "description": "An object indicate whether if the audio modding tool will "
                    "revert all audio source to default before / after doing "
@@ -37,7 +37,7 @@ revert_schema: Schema = {
 }
 
 target_import_pair_schema: Schema = {
-    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/target_import_pair",
+    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/target_import/target_import_pair",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "description": "A target import pair",
     "type": "object",
@@ -65,8 +65,10 @@ target_import_pair_schema: Schema = {
 }
 
 target_import_schema: Schema = {
-    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/target_import",
+    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/target_import/target_import",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "`target_import` provide file path of all the audio source "
+                   "you want to import",
     "type": "object",
     "properties": {
         "workspace": {
@@ -93,8 +95,10 @@ target_import_schema: Schema = {
 }
 
 task_schema: Schema = {
-    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/task",
+    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/target_import/schemas/task",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "A task repesents a list of steps being done in a target import"
+                   " for the active / loaded archive.",
     "type": "object",
     "properties": {
         "revert_all": revert_schema,
@@ -121,7 +125,7 @@ task_schema: Schema = {
 }
 
 manifest_schema: Schema = {
-    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/manifest",
+    "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/target_import/manifest",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
@@ -140,10 +144,4 @@ manifest_schema: Schema = {
         }
     },
     "required": [ "version", "tasks" ],
-    "$defs": {
-        "revert_all": revert_schema,
-        "task": task_schema,
-        "target_import": target_import_schema,
-        "target_import_pair": target_import_pair_schema
-    }
 }
