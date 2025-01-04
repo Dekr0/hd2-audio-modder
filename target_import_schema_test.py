@@ -333,7 +333,7 @@ class TestTargetImportSchema(unittest.TestCase):
         logger.info("Running schema validation test (passing)...")
         test_cases = [
             {
-                "version": 2,
+                "version": 3,
                 "tasks": [
                     {
                         "revert_all": { "before": True, "after": True },
