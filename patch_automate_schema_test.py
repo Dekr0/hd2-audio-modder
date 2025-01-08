@@ -15,14 +15,17 @@ class TestPatchAutomateSchema(unittest.TestCase):
         test_cases = [
             {
                 "archive_files": [ "123", "234" ],
+                "workspace": "",
                 "using": [ "manifest_1.json", "manifest_2.json" ]
             },
             {
                 "using": [ "manifest_2.json", "manifest_3.json" ],
+                "workspace": "",
                 "archive_files": [ "123" ]
             },
             {
                 "using": [ "manifest_3.json" ],
+                "workspace": "",
                 "archive_files": [ "123" ]
             }
         ]
@@ -33,16 +36,27 @@ class TestPatchAutomateSchema(unittest.TestCase):
     def test_patch_task_schema_fail(self):
         logger.info("Running patch_task_schema test (passing)...")
         test_cases = [
+            # Missing workspace
             {
-                "using": [],
+                "using": [ "manifest_3.json" ],
                 "archive_files": [ "123" ]
             },
+            # Missing using
             {
+                "workspace": "",
                 "archive_files": [ "123" ]
             },
+            # Empty archive file
             {
+                "workspace": "",
                 "using": [ "manifest_2.json", "manifest_3.json" ],
                 "archive_files": []
+            },
+            # Empty using 
+            {
+                "workspace": "",
+                "using": [  ],
+                "archive_files": [ "123" ]
             },
         ]
         for test_case in test_cases:
@@ -59,8 +73,9 @@ class TestPatchAutomateSchema(unittest.TestCase):
                 "version": patch_automate_schema.VERSION,
                 "tasks": [
                     {
+                        "workspace": "",
                         "archive_files": [ "123", "234" ],
-                        "using": [ "manifest_1.json", "manifest_2.json" ]
+                        "using": [ "target_import_manifest_1.json", "target_import_manifest_2.json" ]
                     }
                 ]
             },
@@ -68,6 +83,7 @@ class TestPatchAutomateSchema(unittest.TestCase):
                 "version": patch_automate_schema.VERSION,
                 "tasks": [
                     {
+                        "workspace": "",
                         "using": [ "manifest_3.json" ],
                         "archive_files": [ "123" ]
                     }
@@ -78,7 +94,8 @@ class TestPatchAutomateSchema(unittest.TestCase):
                 "tasks": [
                     {
                         "using": [ "manifest_2.json", "manifest_3.json" ],
-                        "archive_files": [ "123" ]
+                        "archive_files": [ "123" ],
+                        "workspace": ""
                     },
                 ]
             }
@@ -86,7 +103,7 @@ class TestPatchAutomateSchema(unittest.TestCase):
 
         for test_case in test_cases:
             logger.info(f"Validating {test_case}")
-            validate(test_case, patch_automate_schema.manifest)
+            validate(test_case, patch_automate_schema.manifest_schema)
 
 
 if __name__ == "__main__":
