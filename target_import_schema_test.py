@@ -7,7 +7,7 @@ from jsonschema import validate
 from log import logger
 
 from target_import_schema import \
-        revert_schema, manifest_schema, target_import_pair_schema, \
+        revert_all_schema, manifest_schema, target_import_pair_schema, \
         target_import_schema, task_schema
 
 
@@ -28,7 +28,7 @@ class TestTargetImportSchema(unittest.TestCase):
 
         for test_case in test_cases:
             logger.info(f"Validating {test_case}")
-            validate(test_case, revert_schema)
+            validate(test_case, revert_all_schema)
 
     def test_revert_all_fail(self):
         logger.info("Running revert_all_schema validation test (failing)...")
@@ -43,7 +43,7 @@ class TestTargetImportSchema(unittest.TestCase):
             logger.info(f"Validating {test_case}")
             self.assertRaises(
                 ValidationError, 
-                lambda: validate(test_case, revert_schema)
+                lambda: validate(test_case, revert_all_schema)
             )
 
     def test_target_import_pair_schema_ok(self):
@@ -93,6 +93,11 @@ class TestTargetImportSchema(unittest.TestCase):
             {
                 "workspace": "..",
                 "folders": [],
+                "pairs": []
+            },
+            {
+                "workspace": "..",
+                "folders": [],
                 "pairs": [
                     { "from": "audio_01.wav", "to": [123] },
                     { "from": "audio_02.wav", "to": [123, 345] },
@@ -133,6 +138,30 @@ class TestTargetImportSchema(unittest.TestCase):
                     { "to": [8080, 8888], "from": "audio_03.wav" },
                     { "to": [80, 400], "from": "audio_04.wav" },
                 ]
+            },
+
+            {
+                "workspace": "..",
+                "folders": [
+                    {
+                        "workspace": ".",
+                        "folders": [
+                            {
+                                "workspace": "folder_1",
+                                "folders": [],
+                                "pairs": []
+                            }
+                        ],
+                        "pairs": [
+                            { "from": "audio_01.wav", "to": [45] },
+                            { "from": "audio_02.wav", "to": [80, 21] },
+                        ]
+                    }
+                ],
+                "pairs": [
+                    { "to": [8080, 8888], "from": "audio_03.wav" },
+                    { "to": [80, 400], "from": "audio_04.wav" },
+                ]
             }
         ]
         for test_case in test_cases:
@@ -142,13 +171,6 @@ class TestTargetImportSchema(unittest.TestCase):
     def test_target_import_schema_fail(self):
         logger.info("Running target_import_schema validation test (failing)...")
         test_cases = [
-            # Empty pairs. Why do you want to make an array of empty pair?
-            {
-                "workspace": "..",
-                "folders": [],
-                "pairs": []
-            },
-
             # Missing folder. Make it an empty array to skip this step 
             {
                 "workspace": "..",
@@ -164,6 +186,24 @@ class TestTargetImportSchema(unittest.TestCase):
                 ]
             },
 
+            {
+                "workspace": "..",
+                "folders": [
+                    {
+                        "workspace": ".",
+                        "folders": [],
+                        "pairs": [
+                            { "from": "audio.wav", "to": [] },
+                            { "from": "audio_02.wav", "to": [80, 21] },
+                        ]
+                    }
+                ],
+                "pairs": [
+                    { "to": [8080, 8888], "from": "audio_03.wav" },
+                    { "to": [80, 400], "from": "audio_04.wav" },
+                ]
+            },
+ 
             # Missing workspace in the nested part
             {
                 "workspace": "..",
@@ -190,50 +230,7 @@ class TestTargetImportSchema(unittest.TestCase):
                     { "to": [9.1, 123], "from": "vo.wav" },
                     { "to": [80, 400], "from": "audio_04.wav" },
                 ]
-            },
- 
-            # One of the `to` is empty
-            {
-                "workspace": "..",
-                "folders": [
-                    {
-                        "workspace": ".",
-                        "folders": [],
-                        "pairs": [
-                            { "from": "audio.wav", "to": [] },
-                            { "from": "audio_02.wav", "to": [80, 21] },
-                        ]
-                    }
-                ],
-                "pairs": [
-                    { "to": [8080, 8888], "from": "audio_03.wav" },
-                    { "to": [80, 400], "from": "audio_04.wav" },
-                ]
-            },
-
-            {
-                "workspace": "..",
-                "folders": [
-                    {
-                        "workspace": ".",
-                        "folders": [
-                            {
-                                "workspace": "folder_1",
-                                "folders": [],
-                                "pairs": [] # Cannot be empty
-                            }
-                        ],
-                        "pairs": [
-                            { "from": "audio_01.wav", "to": [45] },
-                            { "from": "audio_02.wav", "to": [80, 21] },
-                        ]
-                    }
-                ],
-                "pairs": [
-                    { "to": [8080, 8888], "from": "audio_03.wav" },
-                    { "to": [80, 400], "from": "audio_04.wav" },
-                ]
-            },
+            }
         ]
         for test_case in test_cases:
             logger.info(f"Validating {test_case}")
@@ -247,6 +244,7 @@ class TestTargetImportSchema(unittest.TestCase):
         test_cases = [
             {
                 "revert_all": { "before": True, "after": True },
+                "wwise_project": "",
                 "write_patch_to": ".",
                 "target_imports": [
                     {
@@ -295,20 +293,6 @@ class TestTargetImportSchema(unittest.TestCase):
             # Missing revert all
             {
                 "write_patch_to": ".",
-                "target_imports": [
-                    {
-                        "workspace": "..",
-                        "folders": [],
-                        "pairs": [
-                            { "from": "audio_01.wav", "to": [123] },
-                            { "from": "audio_02.wav", "to": [123, 345] }
-                        ]
-                    }
-                ]
-            },
-            # Missing revert all
-            {
-                "revert_all": { "before": True, "after": True },
                 "target_imports": [
                     {
                         "workspace": "..",
