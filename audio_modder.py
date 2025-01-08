@@ -3916,7 +3916,7 @@ class MainWindow:
 
             self.right_click_menu.add_command(
                 label=("Copy File ID" if is_single else "Copy File IDs"),
-                command=self.copy_id_tree
+                command=self.copy_id_linear
             )
 
             if all_audio:
