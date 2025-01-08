@@ -8,8 +8,35 @@ from referencing.jsonschema import Schema
 
 VERSION = 3
 
+template = \
+"""
+{
+    "version": 3,
+    "tasks": [
+        {
+            "revert_all": {
+                "before": true,
+                "after": false
+            },
+            "write_patch_to": "",
+            "target_imports": [
+                {
+                    "workspace": "",
+                    "folders": [],
+                    "pairs": [
+%s
+                    ]
+                }
+            ]
+        }
+    ]
+}
+"""
+pair_template = '{{"from": "", "to": [ {0} ]}}'
+pair_template = pair_template.rjust(len(pair_template) + 24)
 
-revert_schema: Schema = {
+
+revert_all_schema: Schema = {
     "$id": "https://github.com/RaidingForPants/hd2-audio-modder/schemas/target_import/revert",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "description": "An object indicate whether if the audio modding tool will "
@@ -58,10 +85,7 @@ target_import_pair_schema: Schema = {
             "minItems": 1
         }
     },
-    "required": [
-        "from",
-        "to"
-    ]
+    "required": [ "from", "to" ]
 }
 
 target_import_schema: Schema = {
@@ -88,7 +112,7 @@ target_import_schema: Schema = {
                            "in this section of target import.",
             "type": "array",
             "items": target_import_pair_schema,
-            "minItems": 1
+            "minItems": 0
         }
     },
     "required": [ "workspace", "folders", "pairs" ]
@@ -101,7 +125,15 @@ task_schema: Schema = {
                    " for the active / loaded archive.",
     "type": "object",
     "properties": {
-        "revert_all": revert_schema,
+        "wwise_project": {
+            "description": "A file path to a Wwise project (.wproj) you want to "
+                           "use for the conversion between wave file to wem file."
+                           "Ignore this field will result in which the audio "
+                           "modding tool will use its own default Wwise project "
+                           "instead.",
+            "type": "string"
+        },
+        "revert_all": revert_all_schema,
         "write_patch_to": {
             "description": "A file path for generate a new patch after finishing"
                            " target import all the prov$ided audio source and before "
