@@ -1,4 +1,9 @@
 import os
+import pathlib
+import platform
+
+
+SYSTEM = platform.system()
 
 class INode:
 
@@ -7,6 +12,7 @@ class INode:
         self.basename: str = basename
         self.isdir = isdir
         self.nodes: list[INode] = []
+
 
 def generate_file_tree(path) -> INode | None:
     if not os.path.exists(path):
@@ -32,6 +38,7 @@ def generate_file_tree(path) -> INode | None:
                 
     return inodes[path]
 
+
 def traverse(node):
     stack: list[INode] = [node]
     while len(stack) > 0:
@@ -39,3 +46,13 @@ def traverse(node):
         for node in top.nodes:
             if node.isdir:
                 stack.append(node)
+
+
+def std_path(p: str) -> str:
+    match SYSTEM:
+        case "Windows":
+            return pathlib.PureWindowsPath(p).as_posix()
+        case "Linux" | "Darwin":
+            return pathlib.PurePosixPath(p).as_posix()
+        case _:
+            return pathlib.Path(p).as_posix()
