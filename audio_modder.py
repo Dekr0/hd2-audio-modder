@@ -1,17 +1,21 @@
+import asyncio
 import json
+import jsonschema
 import numpy
 import os
 import platform
 import pyaudio
-import subprocess
-import struct
-import tkinter
 import shutil
+import struct
+import subprocess
+import tkinter
 import wave
-import sys
 import pathlib
+import uuid
 import xml.etree.ElementTree as etree
 
+from concurrent import futures
+from dataclasses import dataclass
 from functools import partial
 from functools import cmp_to_key
 from itertools import takewhile
@@ -33,66 +37,24 @@ import config as cfg
 import db
 import log
 import fileutil
+import patch_automate_schema
+import target_import_schema
 
+from const import *
+from env import *
+from xlocale import *
 from log import logger
 
-# constants
-MUSIC_TRACK = 11
-SOUND = 2
-BANK = 0
-PREFETCH_STREAM = 1
-STREAM = 2
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
-VORBIS = 0x00040001
-REV_AUDIO = 0x01A01052
-WWISE_BANK = 6006249203084351385
-WWISE_DEP = 12624162998411505776
-WWISE_STREAM = 5785811756662211598
-STRING = 979299457696010195
-LANGUAGE_MAPPING = ({
-    "English (US)" : 0x03f97b57,
-    "English (UK)" : 0x6f4515cb,
-    "Français" : 4271961631,
-    "Português 1": 1861586415,
-    "Português 2": 1244441033,
-    "Polski": 260593578,
-    "日本語": 2427891497,
-    "中文（繁體）": 2663028010,
-    "中文（简体）": 2189905090,
-    "Nederlands": 291057413,
-    "한국어": 3151476177,
-    "Español 1": 830498882,
-    "Español 2": 3854981686,
-    "Deutsch": 3124347884,
-    "Italiano": 3808107213,
-    "Русский": 3317373165
-})
+# [All constant variables are moved to const.py]
+# [End]
 
-# constants (set once on runtime)
-DIR = os.path.dirname(__file__)
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    DIR = os.path.dirname(sys.argv[0])
-FFMPEG = ""
-VGMSTREAM = ""
-GAME_FILE_LOCATION = ""
-WWISE_CLI = ""
-WWISE_VERSION = ""
-DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
-DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
-SYSTEM = ""
-CACHE = os.path.join(DIR, ".cache")
+# [All global / env. Variables that are set during runtime are moved to env.py]
+# [End]
 
 # global variables
 language = 0
 num_segments = 0
 
-def language_lookup(lang_string):
-    try:
-        return LANGUAGE_MAPPING[lang_string]
-    except:
-        return int(lang_string)
-    
 def strip_patch_index(filename):
     split = filename.split(".")
     for n in range(len(split)):
@@ -102,6 +64,7 @@ def strip_patch_index(filename):
     filename = ".".join(split)
     return filename
     
+
 class WorkspaceEventHandler(FileSystemEventHandler):
 
     # TO-DO: Change get_item_by_path to return all matches, not just the first
@@ -186,6 +149,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                 return self.get_item_by_path_recursion(item, path)
             elif str(child_path) == str(path):
                 return item
+
 
 def list_files_recursive(path="."):
     files = []
@@ -1219,6 +1183,12 @@ class TextBank:
 class FileReader:
     
     def __init__(self):
+        """
+        Default value in case if a user trigger any sort of operation without 
+        loading an archive / patch, and throw exception that is not being handle
+        """
+        self.name = ""
+
         self.wwise_streams = {}
         self.wwise_banks = {}
         self.audio_sources = {}
@@ -1559,8 +1529,9 @@ class FileReader:
         
     def load_deps(self):
         archive_file = ""
-        if os.path.exists(GAME_FILE_LOCATION):
-            archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
+        data_path = get_data_path()
+        if os.path.exists(data_path):
+            archive_file = os.path.join(data_path, strip_patch_index(self.name))
         if not os.path.exists(archive_file):
             warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
             warning.show()
@@ -1600,8 +1571,9 @@ class FileReader:
         
     def load_banks(self):
         archive_file = ""
-        if os.path.exists(GAME_FILE_LOCATION):
-            archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
+        data_path = get_data_path() 
+        if os.path.exists(data_path):
+            archive_file = os.path.join(data_path, strip_patch_index(self.name))
         if not os.path.exists(archive_file):
             warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
             warning.show()
@@ -1716,18 +1688,18 @@ class SoundHandler:
             return
         filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
-            with open(f'{os.path.join(CACHE, filename)}.wem', 'wb') as f:
+            with open(f'{os.path.join(TMP, filename)}.wem', 'wb') as f:
                 f.write(sound_data)
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, filename)}.wav", f"{os.path.join(CACHE, filename)}.wem"], stdout=subprocess.DEVNULL)
-            os.remove(f"{os.path.join(CACHE, filename)}.wem")
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, filename)}.wav", f"{os.path.join(TMP, filename)}.wem"], stdout=subprocess.DEVNULL)
+            os.remove(f"{os.path.join(TMP, filename)}.wem")
             if process.returncode != 0:
                 logger.error(f"Encountered error when converting {sound_id}.wem for playback")
                 self.callback = None
                 return
             
         self.audio_id = sound_id
-        self.wave_file = wave.open(f"{os.path.join(CACHE, filename)}.wav")
-        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
+        self.wave_file = wave.open(f"{os.path.join(TMP, filename)}.wav")
+        self.audio_file = f"{os.path.join(TMP, filename)}.wav"
         self.frame_count = 0
         self.max_frames = self.wave_file.getnframes()
         
@@ -1754,7 +1726,7 @@ class SoundHandler:
                 rate=self.wave_file.getframerate(),
                 output=True,
                 stream_callback=read_stream)
-        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
+        self.audio_file = f"{os.path.join(TMP, filename)}.wav"
         
     def downmix_to_stereo(self, data, channels, channel_width, frame_count):
         if channel_width == 2:
@@ -1832,7 +1804,7 @@ class FileHandler:
                 FFMPEG, 
                 "-f", "lavfi", 
                 "-i", "anullsrc=r=48000:cl=stereo",
-                "-t", "1", # TO-DO, this should match up with actual duration
+                "-t", "1ms", # TO-DO, this should match up with actual duration
                 "-c:a", "pcm_s16le",
                 f"{save_path}.wav"],
                 stdout=subprocess.DEVNULL
@@ -1901,7 +1873,7 @@ class FileHandler:
                     FFMPEG, 
                     "-f", "lavfi", 
                     "-i", "anullsrc=r=48000:cl=stereo",
-                    "-t", "1", # TO-DO, this should match up with actual duration
+                    "-t", "1ms", # TO-DO, this should match up with actual duration
                     "-c:a", "pcm_s16le",
                     f"{save_path}.wav"],
                     stdout=subprocess.DEVNULL
@@ -2249,9 +2221,9 @@ class FileHandler:
                 "Conversion": DEFAULT_CONVERSION_SETTING,
                 "Destination": os.path.basename(source)
             })
-        file.write(os.path.join(CACHE, "external_sources.wsources"))
+        file.write(os.path.join(TMP, "external_sources.wsources"))
         
-        return os.path.join(CACHE, "external_sources.wsources")
+        return os.path.join(TMP, "external_sources.wsources")
         
         
     def load_wavs(self, wavs: list[str] | None = None):
@@ -2277,7 +2249,7 @@ class FileHandler:
             logger.error(e)
             showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
         
-        convert_dest = os.path.join(CACHE, SYSTEM)
+        convert_dest = os.path.join(TMP, SYSTEM)
         try:
             if SYSTEM == "Darwin":
                 subprocess.run([
@@ -2288,7 +2260,7 @@ class FileHandler:
                     "--source-file",
                     source_list,
                     "--output",
-                    CACHE,
+                    TMP,
                 ]).check_returncode()
             elif SYSTEM == "Windows":
                 subprocess.run([
@@ -2299,7 +2271,7 @@ class FileHandler:
                     "--source-file",
                     source_list,
                     "--output",
-                    CACHE,
+                    TMP,
                 ]).check_returncode()
             else:
                 showerror(title="Operation Failed",
@@ -2323,615 +2295,430 @@ class FileHandler:
         except:
             pass
 
-    def load_wav_by_mapping(self,
-                 project: str,
-                 wems: list[tuple[str, AudioSource, int]],
-                 schema: etree.Element) -> bool:
-        if len(wems) == 0:
-            return True
-        tree = etree.ElementTree(schema)
-        schema_path = os.path.join(CACHE, "schema.xml")
-        tree.write(schema_path, encoding="utf-8", xml_declaration=True)
-        convert_ok = True
-        convert_dest = os.path.join(CACHE, SYSTEM)
+    # [Target Automation]
+    async def target_import_automation(self, manifest_path: str):
+        """
+        Target import automation does not support set duration yet.
+
+        Unfortunately, there's no type hinting for schema in here. It completely 
+        relies schema testing and reading the schema. I don't want to spend extra 
+        compute time on mapping dictionary to data class since this operation 
+        is already slow due to its sequential execution.
+
+        @exception
+            - In this current call stack:
+                - jsonschema.ValidationError -> caused by
+                    - Manifest validation fails
+                - JSONDecodeError
+                - OSError -> caused by
+                   - path specified by `script` does not exist
+                   - file open error
+                - RuntimeError -> caused by
+                    - No archive is being loaded when calling this method
+            - Bubble up: 
+                - `convert_wav_to_wem`
+        """
+        if self.file_reader.name == "":
+            raise RuntimeError(f"No archive is being loaded.")
+
+        if not os.path.exists(manifest_path):
+            raise OSError(f"{manifest_path} does not exist")
+
+        manifest: dict[str, Any] = {}
         try:
-            if SYSTEM == "Darwin":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Windows",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            elif SYSTEM == "Windows":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Windows",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
+            with open(manifest_path, "rb") as f:
+                manifest = json.load(f)
+        except json.JSONDecodeError as jerr:
+            # Reformat
+            raise json.JSONDecodeError(f"Target import manifest file {manifest_path} "
+                                       "has malformed syntax", jerr.doc, jerr.pos)
+
+        jsonschema.validate(manifest, target_import_schema.manifest_schema) 
+        for task in manifest["tasks"]:
+            revert_before = task["revert_all"]["before"]
+            revert_after = task["revert_all"]["after"]
+            write_patch_to = task["write_patch_to"]
+            wwise_project = ""
+            if "wwise_project" not in task:
+                wwise_project = DEFAULT_WWISE_PROJECT
             else:
-                convert_ok = False
-                showerror(title="Operation Failed",
-                    message="The current operating system does not support this feature yet")
-        except Exception as e:
-            convert_ok = False
-            logger.error(e)
-            showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
+                wwise_project = task["wwise_project"]
+                if not os.path.exists(wwise_project):
+                    logger.warning(f"The provided wwise project {wwise_project} "
+                                   "does not exist. Using the default wwise project"
+                                   " from audio modding tool.")
+                    wwise_project = DEFAULT_WWISE_PROJECT
 
-        if not convert_ok:
-            return False
+            wem_source_pairs, conversion_schema = \
+                self.create_conversion_listing(task["target_imports"])
 
-        for wem in wems:
-            try:
-                dest_path = os.path.join(convert_dest, wem[0])
-                assert(os.path.exists(dest_path))
-                with open(dest_path, "rb") as f:
-                    wem[1].set_data(f.read())
-            except Exception as e:
-                logger.error(e)
+            tmp_dest = await self.convert_wav_to_wem(wwise_project, conversion_schema)
 
-        try:
-            os.remove(schema_path)
-            shutil.rmtree(convert_dest)
-        except Exception as e:
-            logger.error(e)
-
-        return True
-
-    def load_convert_spec(self):
-        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
-                                          filetypes=[("json", "")])
-        if spec_path == "":
-            logger.warning("Import operation cancelled")
-            return
-        if not os.path.exists(spec_path):
-            showerror(title="Operation Failed", message=f"{spec_path} does not exist.")
-            logger.warning(f"{spec_path} does not exist. Import operation " \
-                    "cancelled")
-            return
-
-        root_spec: Any = None
-        try:
-            with open(spec_path, mode="r") as f:
-                root_spec = json.load(f)
-        except json.JSONDecodeError as err:
-            logger.warning(err)
-            root_spec = None
-
-        if root_spec == None:
-            return
-
-        if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed",
-                      message="Invalid data format in the given spec file.") 
-            logger.warning("Invalid data format in the given spec file. Import "
-                           "operation cancelled")
-            return
-
-        # Validate version number #
-        if "v" not in root_spec:
-            showerror(title="Operation Failed", 
-                      message="The given spec file is missing field `v`") 
-            logger.warning("The given spec file is missing field `v`. Import "
-                           "operation cancelled.")
-            return
-        v = root_spec["v"]
-        if v != 2:
-            showerror(title="Operation Failed", 
-                      message="The given spec file contain invalid version " 
-                      f'number {v}.')
-            logger.warning("The given spec file contain invalid version "
-                           f'number {v}. Import operation cancelled')
-            return
-
-        # Validate `specs` field #
-        if "specs" not in root_spec:
-            showerror(title="Operation Failed", 
-                      message="The given spec file is missing field `specs`.")
-            logger.warning("The given spec file is missing field `specs`."
-                            " Import operation cancelled.")
-            return
-        if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed",
-                      message="Field `specs` is not an array.")
-            logger.warning("Field `specs` is not an array. Import operation "
-                           "cancelled.")
-            return
-
-        # Validate `project` path #
-        project = DEFAULT_WWISE_PROJECT
-        if "project" not in root_spec:
-            logger.warning("Missing field `project`. Using default Wwise project")
-        else:
-            if not isinstance(root_spec["project"], str):
-                logger.warning("Field `project` is not a string. Using default"
-                               " Wwise project")
-            elif not os.path.exists(root_spec["project"]):
-                logger.warning("The given Wwise project does not exist. Using "
-                               "default Wwise project")
-            else:
-                project = root_spec["project"]
-        if not os.path.exists(project):
-            showerror(title="Operation Failed",
-                      message="The default Wwise Project does not exist.")
-            logger.warning("The default Wwise Project does not exist. Import "
-                           "operation cancelled.")
-            return
-        # Validate project `conversion` setting #
-        conversion = DEFAULT_CONVERSION_SETTING
-        if project != DEFAULT_WWISE_PROJECT:
-            if "conversion" not in root_spec:
-                showerror(title="Operation Failed",
-                          message="Missing field `conversion`.")
-                logger.warning("Missing field `conversion`. Import operation"
-                               " cancelled.")
-                return
-            if not isinstance(root_spec["conversion"], str):
-                showerror(title="Operation Failed",
-                          message="Field `conversion` is not a string.")
-                logger.warning("Field `conversion` is not a string. Import "
-                               "operation cancelled.")
-                return
-            conversion = root_spec["conversion"]
-
-        spec_dir = os.path.dirname(spec_path)
-        root = etree.Element("ExternalSourcesList", attrib={
-            "SchemaVersion": "1",
-            "Root": spec_dir
-        })
-        wems: list[tuple[str, AudioSource, int]] = []
-        for sub_spec in root_spec["specs"]:
-            # Validate spec format #
-            if not isinstance(sub_spec, dict):
-                logger.warning("Current entry is not an object. Skipping "
-                               "current entry.")
-                continue
-
-            # Validate work space #
-            workspace = ""
-            if "workspace" not in sub_spec:
-                logger.warning("The given spec file is missing field "
-                               "`workspace`. Use the current directory of the "
-                               "given spec file is in instead.")
-                workspace = spec_dir 
-            else:
-                workspace = sub_spec["workspace"]
-                # Relative path
-                if not os.path.exists(workspace): 
-                    workspace = os.path.join(spec_dir, workspace) 
-            if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped",
-                            message=f"{workspace} does not exist.")
-                logger.warning(f"{workspace} does not exist. Skipping current "
-                               "entry.")
-                continue
-
-            # Validate `mapping` format #
-            mapping: dict[str, list[str] | str] | None
-            if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped", 
-                            message=f"The given spec file is missing field " 
-                            "`mapping`")
-                logger.warning("The given spec file is missing field `mapping`. "
-                        "Skipping current entry.")
-                continue
-            mapping = sub_spec["mapping"]
-            if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped", 
-                            message="field `mapping` has an invalid data type")
-                logger.warning("field `mapping` has an invalid data type. Skipping "
-                        "current entry.")
-                continue
-
-            suffix: str = ""
-            if "suffix" in sub_spec:
-                if not isinstance(sub_spec["suffix"], str):
-                    logger.warning("`suffix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    suffix = sub_spec["suffix"]
-            prefix: str = ""
-            if "prefix" in sub_spec:
-                if not isinstance(sub_spec["prefix"], str):
-                    logger.warning("`prefix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    prefix = sub_spec["prefix"]
-
-            for src, dest in mapping.items():
-                src = prefix + src + suffix
-
-                abs_src = os.path.join(workspace, src)
-                if not abs_src.endswith(".wav"):
-                    logger.info("Require import file missing .wav extension. "
-                            "Adding extension.")
-                    abs_src += ".wav"
-                if not os.path.exists(abs_src):
-                    logger.warning(f"Required import file does not exist "
-                            "Skipping the current entry.")
-                    continue
-
-                if isinstance(dest, str):
-                    file_id: int | None = self.get_number_prefix(dest)
-                    if file_id == None:
-                        logger.warning(f"{dest} does not contain a valid game "
-                                       "asset file id. Skipping the current "
-                                       "entry.")
-                        continue
-                    audio = self.get_audio_by_id(file_id)
-                    convert_dest = f"{file_id}.wem"
-                    if audio == None:
-                        logger.warning(f"No audio source is associated with "
-                                       f"game asset file id {file_id}. Skipping "
-                                       "the current entry.")
-                        continue
-                    etree.SubElement(root, "Source", attrib={
-                        "Path": abs_src,
-                        "Conversion": conversion,
-                        "Destination": convert_dest 
-                    })
-                    wems.append((convert_dest, audio, file_id))
-                elif isinstance(dest, list):
-                    for d in dest:
-                        if not isinstance(d, str):
-                            logger.warning(f"{d} is not a string. Skipping the "
-                                    "current entry.")
-                        file_id: int | None = self.get_number_prefix(d)
-                        if file_id == None:
-                            logger.warning(f"{d} does not contain a valid game "
-                                           "asset file id. Skipping the current "
-                                           "entry.")
-                            continue
-                        audio = self.get_audio_by_id(file_id)
-                        if audio == None:
-                            logger.warning(f"No audio source is associated with "
-                                           f"game asset file id {file_id}. "
-                                           "Skipping the current entry.")
-                            continue
-                        convert_dest = f"{file_id}.wem"
-                        etree.SubElement(root, "Source", attrib={
-                            "Path": abs_src,
-                            "Conversion": conversion,
-                            "Destination": convert_dest
-                        })
-                        wems.append((convert_dest, audio, file_id))
-                else:
-                    logger.warning(f"{dest} is not a string or list of string. "
-                            "Skipping the current entry.")
-            out: str | None = None
-            if "write_patch_to" not in sub_spec:
-                continue
-            out = sub_spec["write_patch_to"]
-            if not isinstance(out, str):
-                showwarning(title="Operation Skipped", 
-                            message="field `write_patch_to` has an invalid data "
-                            "type. Write patch operation cancelled.")
-                logger.warning("field `write_patch_to` has an invalid data "
-                               "type. Write patch operation cancelled.")
-                continue
-            if not os.path.exists(out):
-                # Relative patch write #
-                out = os.path.join(spec_dir, out)
-                if not os.path.exists(out):
-                    showwarning(title="Operation Skipped",
-                                message=f"{out} does not exist. Write patch "
-                                "operation cancelled.")
-                    logger.warning(f"{out} does not exist. Write patch operation "
-                                   "cancelled.")
-                    continue
-            if not self.load_wav_by_mapping(project, wems, root):
-                continue
-            if not self.write_patch(folder=out):
-                showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
-            root = etree.Element("ExternalSourcesList", attrib={
-                "SchemaVersion": "1",
-                "Root": spec_dir 
-            })
-            is_revert = "revert" in sub_spec and \
-                    isinstance(sub_spec["revert"], bool) and \
-                    sub_spec["revert"]
-            is_revert_all = "revert_all" in sub_spec and \
-                    isinstance(sub_spec["revert_all"], bool) and \
-                    sub_spec["revert_all"]
-            if is_revert_all:
+            if revert_before:
                 self.revert_all()
-                continue
-            if is_revert:
-                for wem in wems:
-                    self.revert_audio(wem[2])
-            wems.clear()
 
-        self.load_wav_by_mapping(project, wems, root)
-        out: str | None = None
-        if "write_patch_to" not in root_spec:
-            return
-        out = root_spec["write_patch_to"]
-        if not isinstance(out, str):
-            showerror(title="Operation Failed", 
-                      message="field `write_patch_to` has an invalid data "
-                      "type. Write patch operation cancelled.")
-            logger.warning("field `write_patch_to` has an invalid data "
-                           "type. Write patch operation cancelled.")
-            return
-        if not os.path.exists(out):
-            # Relative path patch writing #
-            out = os.path.join(spec_dir, out)
-            if not os.path.exists(out):
-                showerror(title="Operation Failed",
-                          message=f"{out} does not exist. Write patch "
-                          "operation cancelled.")
-                logger.warning(f"{out} does not exist. Write patch operation "
-                              "cancelled.")
-                return
-        if not self.write_patch(folder=out):
-            showerror(title="Operation Failed",
-                      message="Write patch operation failed. Check "
-                      "log.txt for detailed.")
+            tmp_dest = os.path.join(tmp_dest, SYSTEM)
+            wem_source_pairs = [(os.path.join(tmp_dest, pair[0]), pair[1])
+                                 for pair in wem_source_pairs]
 
-        is_revert = "revert" in root_spec and \
-                isinstance(root_spec["revert"], bool) and \
-                root_spec["revert"]
-        if is_revert:
-            for wem in wems:
-                self.revert_audio(wem[2])
+            for wem_sources_pair in wem_source_pairs:
+                wem = wem_sources_pair[0]
+                audio_sources = wem_sources_pair[1]
+                if not os.path.exists(wem_sources_pair[0]):
+                    logger.warning(f"Converted wem file {wem} does not exist."
+                                   f"Skipping target pair {wem_sources_pair}.")
+                    continue
 
-    def load_wems_spec(self):
-        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
-                                          filetypes=[("json", "")])
-        if spec_path == "":
-            logger.warning("Import operation cancelled")
-            return
-        if not os.path.exists(spec_path):
-            showerror(title="Operation Failed", 
-                      message=f"{spec_path} does not exist.")
-            logger.warning(f"{spec_path} does not exist. Import operation "
-                           "cancelled")
-            return
+                audio_data: bytes
+                with open(wem, "rb") as f:
+                    audio_data = f.read()
 
-        root_spec: Any = None
+                for audio_source in audio_sources:
+                    audio_source.set_data(audio_data)
+
+            if write_patch_to != "":
+                if os.path.exists(write_patch_to):
+                    self.write_patch(write_patch_to)
+                else:
+                    logger.warning("The specified path location for patch "
+                                   f"generation does not exist {write_patch_to}")
+
+            if revert_after:
+                self.revert_all()
+
+            try:
+                shutil.rmtree(tmp_dest)
+            except OSError as err:
+                logger.warning("Failed to remove temporary staging point for "
+                               f"wave files to wem files conversion. Trace: {err}")
+
+
+    def create_conversion_listing(self, target_imports) -> \
+            tuple[ list[tuple[str, list[AudioSource]]], etree.ElementTree ]:
+        """
+        @return
+        tuple - [ list[tuple[str, list[AudioSource]]] ]
+            - list[tuple[ str, list[AudioSource] ]]
+                - str - The relative file path of wem file generated from wave 
+                file conversion in the temporary staging point (.tmp/SYSTEM).
+                - list[AudioSource] - An array of audio sources that will be set
+                a wem file generated from wave file 
+            - etree.ElementTree - A XML schema used for Wwise Console during the 
+            conversion
+
+        @exception - None
+        """
+        conversion_schema = etree.Element("ExternalSourcesList", attrib={
+            "SchemaVersion": "1",
+            "Root": TMP
+        })
+
+        wem_sources_pairs: list[tuple[str, list[AudioSource]]] = []
+        stack = []
+        for target_import in target_imports:
+            stack.append(target_import)
+
+        while len(stack) > 0:
+            top_target_import = stack.pop()
+
+            workspace = top_target_import["workspace"]
+            folders = top_target_import["folders"]
+            if len(folders):
+                for folder in folders:
+                    folder["workspace"] = os.path.join(workspace, folder["workspace"])
+                    stack.append(folder)
+
+            pairs = top_target_import["pairs"]
+            for pair in pairs:
+                from_file: str = fileutil.std_path(
+                    os.path.join(workspace, pair["from"])
+                )
+
+                from_file_name, ext = os.path.splitext(from_file)
+                if ext == "":
+                    from_file += ".wav"
+                elif ext != ".wav":
+                    logger.warning(f"Target import {pair} fail. Reason: "
+                                   f"{from_file} is not in wave format.")
+                    continue
+
+                if not os.path.exists(from_file):
+                    logger.warning(f"Target import {pair} fail. Reason: "
+                                   f"{from_file} does not exists.")
+                    continue
+
+                from_file_wem = from_file_name.replace(":/", "/")
+                from_file_wem = f"{from_file_wem.replace("/", "_")}.wem"
+
+                unique_audio_sources: dict[int, AudioSource] = {}
+                to: list[int] = pair["to"]
+                for source_id in to:
+                    audio_source: AudioSource | None = self.get_audio_by_id(source_id)
+                    if audio_source == None:
+                        logger \
+                            .warning(f"Audio source {source_id} provided in target import"
+                                     f"pair {pair} does not have a physical audio source."
+                                     " Removing this from the list.")
+                        continue
+                    unique_audio_sources[source_id] = audio_source
+
+                if len(unique_audio_sources) <= 0:
+                    logger.warning(f"Target import {pair} fail. Reason: No valid "
+                                   "audio source is associated with this pair.")
+                    continue
+
+                etree.SubElement(conversion_schema, "Source", attrib={
+                    "Path": os.path.abspath(from_file),
+                    "Conversion": DEFAULT_CONVERSION_SETTING,
+                    "Destination": from_file_wem
+                })
+
+                wem_sources_pairs.append((from_file_wem, list(unique_audio_sources.values())))
+
+        return wem_sources_pairs, etree.ElementTree(conversion_schema)
+
+    async def convert_wav_to_wem(self, 
+                                 project: str, 
+                                 conversion_schema: etree.ElementTree):
+        """
+        @exception
+        OSError -> caused by
+            - failed to (remove and) create temporary staging point for wave files
+            to wem files conversion
+            - writing a conversion schema to disk
+        NotImplementedError -> caused by
+            - The current OS is not Windows or MacOS
+        ChildProcessErrors -> caused by
+            - Wwise project migration has a return code of non zero.
+            - Wwise wave files to wem files conversion has a return code of non
+            zero.
+        """
+        if not os.path.exists(TMP):
+            os.mkdir(TMP)
+
+        uid = uuid.uuid4().hex
+        tmp_dest = std_path(os.path.join(TMP, uid))
+
+        print(tmp_dest)
+
+        # Unlikely
+        if os.path.exists(tmp_dest):
+            shutil.rmtree(tmp_dest)
+
+        os.mkdir(tmp_dest)
+
+        project = std_path(os.path.abspath(project))
+
+        etree.indent(conversion_schema, space="    ", level=0)
+        conversion_schema_path = os.path.abspath(os.path.join(
+            tmp_dest, "conversion_schema.xml"))
+        conversion_schema.write(conversion_schema_path, 
+                                encoding="utf-8", 
+                                xml_declaration=True)
+        
+        system = platform.system()
+
+        if system not in ["Windows", "Darwin"]:
+            raise NotImplementedError("The current OS does not support Wwise "
+                                      "project migration.")
+
+        proc = await asyncio.subprocess.create_subprocess_exec(
+            WWISE_CLI, *["migrate", project, "--quiet"]
+        )
+        rcode = await proc.wait()
+
+        if rcode != 0:
+            raise ChildProcessError("Failed to perform Wwise project "
+                                        f"migration. Error code: {rcode}")
+
+        proc = await asyncio.subprocess.create_subprocess_exec(
+            WWISE_CLI,
+            *[
+                 "convert-external-source", project,
+                 "--platform", "Windows",
+                 "--source-file", os.path.abspath(conversion_schema_path),
+                 "--output", tmp_dest,
+            ]
+        )
+        rcode = await proc.wait()
+
+        if rcode != 0:
+            raise ChildProcessError("Failed to convert provided wave files to "
+                                    f"wem files. Reason: return code {proc.returncode}")
+
         try:
-            with open(spec_path, mode="r") as f:
-                root_spec = json.load(f)
-        except json.JSONDecodeError as err:
-            logger.warning(err)
-            root_spec = None
+            os.remove(conversion_schema_path)
+        except OSError as err:
+            logger.warning(f"Failed to remove temporary conversion schema. Trace"
+                           f": {err}")
 
-        if root_spec == None:
-            return
+        return tmp_dest
+    # [End]
 
-        if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed",
-                      message="Invalid data format in the given spec file.") 
-            logger.warning("Invalid data format in the given spec file. Import "
-                    "operation cancelled")
-            return
+    # [Patch Automation]
+    @dataclass
+    class PatchAuotmationTask:
 
-        # Validate version number # 
-        if "v" not in root_spec:
-            showerror(title="Operation Failed",
-                      message="The given spec file is missing field `v`") 
-            logger.warning("The given spec file is missing field `v`. Import "
-                    "operation cancelled.")
-            return
-        if root_spec["v"] != 2:
-            showerror(title="Operation Failed",
-                      message="The given spec file contain invalid version " + 
-                        f'number {root_spec["v"]}.')
-            logger.warning("The given spec file contain invalid version "
-                    f'number {root_spec["v"]}. Import operation cancelled')
-            return
+        archive_files: set[str]
+        usings: set[str]
 
-        # Validate `specs` format #
-        if "specs" not in root_spec:
-            showerror(title="Operation Failed",
-                      message="The given spec file is missing field `specs`.")
-            logger.warning("The given spec file is missing field `specs`."
-                            " Import operation cancelled.")
-            return
-        if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed",
-                      message="Field `specs` is not an array.")
-            logger.warning("Field `specs` is not an array. Import operation "
-                           "cancelled.")
-            return
+    def patch_automation(self, manifest_path: str):
+        """
+        @exception
+        - In this current call stack:
+            - jsonschema.ValidationError -> caused by
+                    - Manifest validation fails
+            - JSONDecodeError
+            - OSError -> caused by
+                - path specified by manifest_path does not exist
+            - RuntimeError -> caused by
+                - No valid task is available to run
+        """
+        if not os.path.exists(manifest_path):
+            raise OSError(f"Patch automation manifest file {manifest_path} does "
+                          "not exist.")
 
-        spec_dir = os.path.dirname(spec_path)
-        patched_ids: list[int] = []
-        for sub_spec in root_spec["specs"]:
-            if not isinstance(sub_spec, dict):
-                logger.warning("Current entry is not an object. Skipping "
-                               "current entry.")
-                continue
+        manifest: dict[str, Any] = {}
+        try:
+            with open(manifest_path, "rb") as f:
+                manifest = json.load(f)
+        except json.JSONDecodeError as jerr:
+            # Reformat
+            raise json.JSONDecodeError(f"Target import manifest file {manifest_path} "
+                                       "has malformed syntax", jerr.doc, jerr.pos)
 
-            workspace = ""
-            # Validate work space # 
-            if "workspace" not in sub_spec:
-                logger.warning("The given spec file is missing field "
-                               "`workspace`. Use the current directory of the "
-                               "given spec file is in instead.")
-                workspace = spec_dir
-            else:
-                workspace = sub_spec["workspace"]
-                # Relative path
-                if not os.path.exists(workspace): 
-                    workspace = os.path.join(spec_dir, workspace) 
+        jsonschema.validate(manifest, patch_automate_schema.manifest_schema)
+
+        valid_tasks: list[self.PatchAuotmationTask] = []
+
+        for task in manifest["tasks"]:
+            result = self.validate_task(task)
+            if result != None:
+                valid_tasks.append(result)
+
+        threaded_tasks: list[tuple[str, str]] = []
+        for valid_task in valid_tasks:
+            for archive_file in valid_task.archive_files:
+                for using in valid_task.usings:
+                    threaded_tasks.append((archive_file, using))
+
+
+        if len(valid_tasks) <= 0:
+            raise RuntimeError(f"The provided patch automation {manifest_path}"
+                               " does not have any valid task to run.")
+
+        with futures.ThreadPoolExecutor() as p: 
+            """
+            Unfortunately no map since it doesn't provide error / excetion 
+            collection.
+            """
+            fs: list[futures.Future] = []
+            for threaded_task in threaded_tasks:
+                fs.append(
+                    p.submit(lambda: self.run_patch_automation_task(*threaded_task))
+                )
+
+            for f in fs:
+                try:
+                    f.result()
+                except Exception as err:
+                    logger.warning(f"Patch automation task error. Reason: {err}")
+
+    def run_patch_automation_task(self, archive_file: str, manifest_path: str):
+        """
+        @exception
+        - In this current call stack
+            - AssertionError -> caused by
+                - archive_file does not exist in disk (should be caught in validation)
+                - target_import_manifest does not exist in disk (should be caught in validation)
+            - json.JSONDecodeError
+        - load_archive_file
+            - OSError
+            - ...
+        - target_import_automation
+            - Check FileHandler.target_import_automation 
+        """
+        if not os.path.exists(archive_file):
+            raise AssertionError(f"Archive file {archive_file} does not exist in "
+                                 "disk.")
+        if not os.path.exists(manifest_path):
+            raise AssertionError(f"Target import manifest {manifest_path}"
+                                 " does not exist in disk.")
+
+        handler = FileHandler()
+        try:
+            handler.load_archive_file(archive_file=archive_file)
+            asyncio.run(handler.target_import_automation(manifest_path))
+        except Exception as err:
+            logger.error(f"Patch automation task for {archive_file} using "
+                         f"{os.path.basename(manifest_path)} failed. Reason: "
+                         f"{err}")
+
+    def validate_task(self, task) -> PatchAuotmationTask | None:
+        data = ""
+        if "data" not in task:
+            logger.info("The file path for archive files lookup does not exist."
+                        " Using data directory for Helldivers 2 for archive files"
+                        "lookup instead...")
+            data = os.environ.get("HD2DATA")
+            if data == None:
+                logger.warning("HD2DATA enviromental variable is not set.")
+                logger.warning("No archive files lookup source. Skipping the"
+                               "current task.")
+                return None
+            if not os.path.exists(data):
+                logger.warning(f"The file path {data} for archive files lookup"
+                               " does not exist. Skipping the current task.")
+                logger.warning(f"Double check the HD2DATA environmental variable.")
+                return None
+        else:
+            data = std_path(os.path.abspath(task["data"]))
+            if not os.path.exists(task["data"]):
+                logger.warning(f"The file path {data} for archive files lookup"
+                               " does not exist. Skipping the current task.")
+                return None
+
+        archive_files = set()
+        for archive_file in task["archive_files"]:
+            archive_file = std_path(os.path.abspath(os.path.join(data, 
+                                                                 archive_file)))
+            if not os.path.exists(archive_file):
+                logger.warning(f"Archive file {archive_file} does not exists."
+                               "Skipping this archive file.")
+                return None
+            archive_files.add(archive_file)
+
+        if len(archive_files) <= 0:
+            logger.warning("The current task does not have any valid archive"
+                           " file. Skipping this task")
+            return None
+
+        workspace = ""
+        if "workspace" in task:
+            workspace = task["workspace"]
             if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped",
-                            message=f"{workspace} does not exist.")
-                logger.warning(f"{workspace} does not exist. Skipping current"
-                        " entry")
+                logger.warning(f"The provided workspace {workspace} for target "
+                               "import automation manifest does not exist. "
+                               "Skipping the current task.")
+                return None
+
+        usings = set()
+        for using in task["using"]:
+            using = std_path(os.path.abspath(os.path.join(workspace, using)))
+            if not os.path.exists(using):
+                logger.warning(f"The provided target import automation manifest {using}"
+                               " does not exist. Skipping this target import "
+                               "autoamtion manifest.")
                 continue
+            usings.add(using)
 
-            # Validate `mapping` format # 
-            mapping: dict[str, list[str] | str] | None
-            if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped",
-                            message=f"The given spec file is missing field "
-                            "`mapping`")
-                logger.warning("The given spec file is missing field `mapping`. "
-                        "Skipping current entry")
-                continue
-            mapping = sub_spec["mapping"]
-            if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped",
-                            message="field `mapping` has an invalid data type")
-                logger.warning("field `mapping` has an invalid data type. "
-                        "Skipping current entry")
-                continue
+        if len(usings) <= 0:
+            logger.warning("The current task does not have any valid target "
+                           "import autoamtion manifest. Skipping this current"
+                           " task.")
+            return None
 
-            suffix: str = ""
-            if "suffix" in sub_spec:
-                if not isinstance(sub_spec["suffix"], str):
-                    logger.warning("`suffix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    suffix = sub_spec["suffix"]
-            prefix: str = ""
-            if "prefix" in sub_spec:
-                if not isinstance(sub_spec["prefix"], str):
-                    logger.warning("`prefix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    prefix = sub_spec["prefix"]
-
-            progress_window = ProgressWindow(title="Loading Files",
-                                             max_progress=len(sub_spec.items()))
-            progress_window.show()
-
-            for src, dest in mapping.items():
-                logger.info(f"Loading {src} into {dest}")
-                progress_window.set_text(f"Loading {src} into {dest}")
-
-                src = prefix + src + suffix
-
-                abs_src = os.path.join(workspace, src)
-                if not abs_src.endswith(".wem"):
-                    logger.info("Require import file missing .wem extension. "
-                            "Adding extension.")
-                    abs_src += ".wem"
-                if not os.path.exists(abs_src):
-                    logger.warning(f"Required import file does not exist "
-                            "Skipping the current entry.")
-                    continue
-
-                if isinstance(dest, str):
-                    file_id: int | None = self.get_number_prefix(dest)
-                    if file_id == None:
-                        logger.warning(f"{dest} does not contain a valid game "
-                                       "asset file id. Skipping the current "
-                                       "entry.")
-                        continue
-                    audio: str | None = self.get_audio_by_id(file_id)
-                    if audio == None:
-                        logger.warning(f"No audio source is associated with "
-                                       "game asset file id {file_id}. Skipping "
-                                       "the current entry.")
-                        continue
-                    with open(abs_src, "rb") as f:
-                        audio.set_data(f.read())
-                    progress_window.step()
-
-                    patched_ids.append(file_id)
-                elif isinstance(dest, list):
-                    for d in dest:
-                        if not isinstance(d, str):
-                            logger.warning(f"{d} is not a string. Skipping the "
-                                    "current entry.")
-                        file_id: int | None = self.get_number_prefix(d)
-                        if file_id == None:
-                            logger.warning(f"{d} does not contain a valid game "
-                                           "asset file id. Skipping the current "
-                                           "entry.")
-                            continue
-                        audio: str | None = self.get_audio_by_id(file_id)
-                        if audio == None:
-                            logger.warning(f"No audio source is associated with "
-                                    "game asset file id {file_id}. Skipping the "
-                                    "current entry.")
-                            continue
-                        with open(abs_src, "rb") as f:
-                            audio.set_data(f.read())
-                        progress_window.step()
-
-                        patched_ids.append(file_id)
-                else:
-                    logger.warning(f"{dest} is not a string or list of string. "
-                            "Skipping the current entry.")
-
-            progress_window.destroy()
-
-            out: str | None = None
-            if "write_patch_to" not in sub_spec:
-                return
-            out = sub_spec["write_patch_to"]
-            if not isinstance(out, str):
-                showwarning(title="Operation Skipped",
-                            message="field `write_patch_to` has an invalid data "
-                            "type. Write patch operation cancelled.")
-                logger.warning("field `write_patch_to` has an invalid data "
-                               "type. Write patch operation cancelled.")
-                continue
-            if not os.path.exists(out):
-                # Relative path
-                out = os.path.join(spec_dir, out)
-                if not os.path.exists(out):
-                    showwarning(title="Operation Skipped", 
-                                message=f"{out} does not exist. Write patch "
-                                "operation cancelled.")
-                    logger.warning(f"{out} does not exist. Write patch operation "
-                                   "cancelled.")
-                    continue
-            if not self.write_patch(folder=out):
-                showerror(title="Operation Failed",
-                          message="Write patch operation failed. Check "
-                          "log.txt for detailed.")
-            is_revert = "revert" in sub_spec and \
-                    isinstance(sub_spec["revert"], bool) and \
-                    sub_spec["revert"]
-            if is_revert:
-                for patched_id in patched_ids:
-                    self.revert_audio(patched_id)
-            patched_ids.clear()
-            
-        out: str | None = None
-        if "write_patch_to" not in root_spec:
-            return
-        out = root_spec["write_patch_to"]
-        if not isinstance(out, str):
-            showerror(title="Operation Failed", message="field `write_patch_to` has an invalid data "
-                        "type. Write patch operation cancelled.")
-            logger.warning("field `write_patch_to` has an invalid data "
-                           "type. Write patch operation cancelled.")
-            return
-        if not os.path.exists(out):
-            # Relative path
-            out = os.path.join(spec_dir, out)
-            if not os.path.exists(out):
-                showerror(title="Operation Failed", message=f"{out} does not exist. Write patch "
-                            "operation cancelled.")
-                logger.warning(f"{out} does not exist. Write patch operation "
-                               "cancelled.")
-                return
-        if not self.write_patch(folder=out):
-            showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
-
-        is_revert = "revert" in root_spec and \
-                isinstance(root_spec["revert"], bool) and \
-                root_spec["revert"]
-        if is_revert:
-            for patched_id in patched_ids:
-                self.revert_audio(patched_id)
-        patched_ids.clear()
+        return self.PatchAuotmationTask(archive_files, usings)
 
 
 class ProgressWindow:
@@ -3490,6 +3277,7 @@ class ArchiveSearch(ttk.Entry):
         self.entries = entries
         self.delete(0, tkinter.END)
 
+
 class MainWindow:
 
     dark_mode_bg = "#333333"
@@ -3500,6 +3288,11 @@ class MainWindow:
     light_mode_fg = "#000000"
     light_mode_modified_bg = "#7CFC00"
     light_mode_modified_fg = "#000000"
+
+    @dataclass
+    class TreeviewMenuEnableFlag:
+        is_single: bool = False
+        allow_dump: bool = False
 
     def __init__(self, 
                  app_state: cfg.Config, 
@@ -3532,7 +3325,7 @@ class MainWindow:
         self.search_text_var = tkinter.StringVar(self.root)
         self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
         self.top_bar.pack(side="top", fill='x')
-        if lookup_store != None and os.path.exists(GAME_FILE_LOCATION):
+        if lookup_store != None and os.path.exists(get_data_path()):
             self.init_archive_search_bar()
 
         self.up_button = ttk.Button(self.top_bar, text='\u25b2',
@@ -3603,6 +3396,15 @@ class MainWindow:
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
+
+        self.right_click_copy_menu = Menu(self.right_click_menu, tearoff=0)
+        self.init_right_click_copy_menu()
+
+        self.right_click_export_menu = Menu(self.right_click_menu, tearoff=0)
+        self.init_right_click_export_menu()
+
+        self.right_click_export_wav_menu = Menu(self.right_click_export_menu, tearoff=0)
+
         self.right_click_id = 0
 
         self.menu = Menu(self.root, tearoff=0)
@@ -3631,7 +3433,7 @@ class MainWindow:
         self.recent_file_menu = Menu(self.file_menu, tearoff=0)
 
         self.load_archive_menu = Menu(self.menu, tearoff=0)
-        if os.path.exists(GAME_FILE_LOCATION):
+        if os.path.exists(get_data_path()):
             self.load_archive_menu.add_command(
                 label="From HD2 Data Folder",
                 command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
@@ -3657,16 +3459,10 @@ class MainWindow:
             label="Import Audio Files",
             command=self.import_audio_files
         )
-        self.import_menu.add_command(
-            label="Import using spec.json (.wem)",
-            command=lambda: self.file_handler.load_wems_spec() or 
-                self.check_modified()
-        )
         if os.path.exists(WWISE_CLI):
             self.import_menu.add_command(
-                label="Import using spec.json (.wav)",
-                command=lambda: self.file_handler.load_convert_spec() or 
-                    self.check_modified()
+                label="Target Import Automation",
+                command=self.target_import_automation
             )
             
         self.file_menu.add_cascade(
@@ -3707,7 +3503,7 @@ class MainWindow:
         self.workspace.drop_target_register(DND_FILES)
         self.workspace.drag_source_register(1, DND_FILES)
 
-        self.treeview.bind("<Button-3>", self.treeview_on_right_click)
+        self.treeview.bind("<Button-3>", self.new_treeview_on_right_click)
         self.workspace.bind("<Button-3>", self.workspace_on_right_click)
         self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
@@ -3748,13 +3544,13 @@ class MainWindow:
                     if answer is None:
                         return
                     if not answer:
-                        new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
+                        new_name = f"{os.path.join(TMP, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
                         os.rename(import_files[0], new_name)
                         old_name = import_files[0]
                         import_files[0] = new_name
                         renamed = True
                 else:
-                    new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
+                    new_name = f"{os.path.join(TMP, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
                     os.rename(import_files[0], new_name)
                     old_name = import_files[0]
                     import_files[0] = new_name
@@ -3979,12 +3775,12 @@ class MainWindow:
         others = [file for file in files if os.path.splitext(file)[1] in [".mp3", ".ogg", ".m4a"]]
         temp_files = []
         for file in others:
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
             if process.returncode != 0:
                 logger.error(f"Encountered error when importing {os.path.basename(file)}")
             else:
-                wavs.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
-                temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
+                wavs.append(f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav")
+                temp_files.append(f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav")
         
         for patch in patches:
             self.file_handler.load_patch(patch_file=patch)
@@ -4079,11 +3875,29 @@ class MainWindow:
         if not filename or not os.path.exists(filename):
             return
         old_name = filename
-        new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
+        new_name = f"{os.path.join(TMP, str(target))}{os.path.splitext(filename)[1]}"
         os.rename(filename, new_name)
         self.import_files([new_name])
         os.rename(new_name, old_name)
-        
+
+    def target_import_automation(self):
+        if not os.path.exists(WWISE_CLI):
+            showwarning(
+                "Unsupported Operation", 
+                "Missing installation of WwiseConsole")
+            return
+
+        filename = askopenfilename(
+            title="Select target import automation manifest", 
+            filetypes=[("JSON file", "*.json")]
+        )
+        if not filename:
+            return
+        try:
+            asyncio.run(file_handler.target_import_automation(filename))
+            self.check_modified()
+        except Exception as err:
+            showerror("Target Import Automation Error", str(err))
 
     def treeview_on_right_click(self, event):
         try:
@@ -4102,7 +3916,7 @@ class MainWindow:
 
             self.right_click_menu.add_command(
                 label=("Copy File ID" if is_single else "Copy File IDs"),
-                command=self.copy_id
+                command=self.copy_id_tree
             )
 
             if all_audio:
@@ -4225,23 +4039,24 @@ class MainWindow:
         elif selection_type == "Text Bank":
             pass
 
-    def copy_id(self):
-        self.root.clipboard_clear()
-        self.root.clipboard_append("\n".join([self.treeview.item(i, option="tags")[0] for i in self.treeview.selection()]))
-        self.root.update()
-
     def dump_as_wem(self):
-        if len(self.treeview.selection()) == 1:
-            self.file_handler.dump_as_wem(self.right_click_id)
-        else:
-            self.file_handler.dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()])
+        selects = self.treeview.selection()
+        if len(selects) == 1:
+            return self.file_handler.dump_as_wem(
+                    int(self.get_entry_tag_id(selects[0])))
+
+        self.file_handler.dump_multiple_as_wem([
+            int(self.get_entry_tag_id(select)) for select in selects
+        ])
 
     def dump_as_wav(self, muted: bool = False, with_seq: int = False):
-        if len(self.treeview.selection()) == 1:
-            self.file_handler.dump_as_wav(self.right_click_id, muted=muted)
-            return
+        selects = self.treeview.selection()
+        if len(selects) == 1:
+            return self.file_handler.dump_as_wav(
+                    int(self.get_entry_tag_id(selects[0])), muted=muted)
+
         self.file_handler.dump_multiple_as_wav(
-            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
+            [ int(self.get_entry_tag_id(select)) for select in selects ],
             muted=muted,
             with_seq=with_seq
         )
@@ -4550,53 +4365,261 @@ class MainWindow:
             self.check_modified()
             self.show_info_window()
 
+    """
+    Getter function with Assertion on tree view entry properties. Use them if 
+    there are some rules needed to be enforced to prevent unexpect behaviors.
+    """
+    def get_entry_values(self, view_id: str):
+        values = self.treeview.item(view_id, option="values")
+        if values == '' or len(values) <= 0:
+            raise AssertionError(f"Treeview entry {view_id} has no values")
+        return values
+
+    def get_entry_tags(self, view_id: str):
+        tags = self.treeview.item(view_id, option="tags")
+        if tags == '' or len(tags) <= 0:
+            raise AssertionError(f"Treeview entry {view_id} has no tags")
+        return tags
+
+    def get_entry_tag_id(self, view_id: str):
+        tags = self.get_entry_tags(view_id)
+        return tags[0]
+
+    def get_entry_type(self, view_id: str):
+        values = self.get_entry_values(view_id)
+        if not isinstance(values[0], str):
+            raise AssertionError("Treeview entry {view_id} first value is not a "
+                                 "string type for Entry type")
+        return values[0]
+    """
+    End
+    """
+
+    """
+    Seelction Overhauling
+    """
+    def treeview_selection_collaspe(self):
+        selects = set(self.treeview.selection())
+        collaspe_selects: set[str] = set()
+        for select in selects:
+            parent_entry_vid = self.treeview.parent(select)
+            if parent_entry_vid not in selects:
+                collaspe_selects.add(select)
+        return tuple(collaspe_selects)
+    """
+    End
+    """
+
+    """
+    Copy ID Overhaul
+    """
+    def copy_id_linear(self):
+        self.root.clipboard_clear()
+
+        content: list[str] = []
+        for select in self.treeview.selection():
+            etype = self.get_entry_type(select)
+            match etype:
+                case "Sound Bank" | "Text Bank":
+                    tid = self.get_entry_tag_id(select)
+                    text = self.treeview.item(select, option="text") \
+                                        .replace("\x00", "")
+                    text = f"{text}: {tid}"
+                case _:
+                    tid = self.get_entry_tag_id(select)
+                    text = f"\"placeholder\": {tid} ({etype})"
+            content.append(text)
+
+        self.root.clipboard_append("\n".join(content))
+        self.root.update()
+
+    def copy_id_tree(self, with_descendant: bool):
+        """
+        Copy IDs of entry (including all its children)
+
+        @exception
+        - AssertionError -> caused by
+            - The length of stack is none zero after traversing a single entry
+        """
+        self.root.clipboard_clear()
+
+        stack: list[tuple[int, str]] = []
+        tab: int = 0
+        content = []
+        for select in self.treeview_selection_collaspe():
+            if len(stack) > 0:
+                raise AssertionError("The stack is not empty after traversing a "
+                                     "single entry.")
+            tab = 0
+            stack = [(tab, select)]
+            while len(stack) > 0:
+                tab, vid = stack.pop()
+
+                if with_descendant:
+                    for child in self.treeview.get_children(vid):
+                        stack.append((tab + 1, child))
+
+                etype = self.get_entry_type(vid)
+
+                tabs = "".join([" " for _ in range(tab * 4)])
+
+                match etype:
+                    case "Sound Bank" | "Text Bank":
+                        tid = self.get_entry_tag_id(vid)
+                        text = self.treeview.item(vid, option="text") \
+                                            .replace("\x00", "")
+                        text = f"{tabs}{text}: {tid}"
+                    case _:
+                        tid = self.get_entry_tag_id(vid)
+                        text = f"{tabs}\"placeholder\": {tid} ({etype})"
+
+                content.append(text)
+
+        self.root.clipboard_append("\n".join(content))
+        self.root.update()
+    """
+    End
+    """
+
+    """
+    Treeview Right Click Menu Overhaul
+    """
+    def init_right_click_copy_menu(self):
+        self.right_click_copy_menu.add_command(
+                label="Linear",
+                command=self.copy_id_linear,
+        )
+        self.right_click_copy_menu.add_command(
+            label="Tree Structure With Descendant",
+            command=lambda: self.copy_id_tree(True)
+        )
+        self.right_click_copy_menu.add_command(
+            label="Tree Structure With No Descendant",
+            command=lambda: self.copy_id_tree(False)
+        )
+
+    def init_right_click_export_menu(self):
+        self.right_click_export_menu.add_command(
+            label="As Wwise Encoded Meida (wem)",
+            command=self.dump_as_wem
+        )
+
+        if not os.path.exists(VGMSTREAM):
+            return
+
+        self.right_click_export_menu.add_command(
+            label="As Wave File (wav)",
+            command=self.dump_as_wav
+        )
+        self.right_click_export_menu.add_command(
+            label="As Wave File (wav) With Sequence Suffix",
+            command=lambda: self.dump_as_wav(with_seq=True)
+        )
+        self.right_click_export_menu.add_command(
+            label="As Wave File (wav) (0.1 Second Muted)",
+            command=lambda: self.dump_as_wav(muted=True)
+        )
+        self.right_click_export_menu.add_command(
+            label="As Wave File (wav) (Muted) With Sequence Suffix",
+            command=lambda: self.dump_as_wav(muted=True, with_seq=True)
+        )
+
+    def new_treeview_on_right_click(self, ev):
+        self.right_click_menu.delete(0, "end")
+        self.right_click_menu.add_command(
+            label="Generate Target Import Manifest (Selected)",
+            command=self.generate_target_import_manifest
+        )
+        self.right_click_menu.add_cascade(menu=self.right_click_copy_menu, 
+                                          label="Copy IDs")
+        self.add_import_export_option()
+        self.right_click_menu.tk_popup(ev.x_root, ev.y_root)
+        self.right_click_menu.grab_release()
+
+    def add_import_export_option(self):
+        selects = self.treeview.selection()
+
+        """
+        Target Import
+        """
+        if len(selects) == 1:
+            self.add_target_import_option(selects[0])
+
+        """
+        Audio Export
+        """
+        self.add_export_option(selects)
+
+    def add_target_import_option(self, select: str):
+        etype = self.get_entry_type(select)
+        if etype != "Audio Source":
+            return
+
+        tid = self.get_entry_tag_id(select)
+        self.right_click_menu.add_command(
+            label="Import Audio",
+            command=lambda: self.targeted_import(target=tid)
+        )
+
+    def add_export_option(self, selects: tuple[str, ...]):
+        for select in selects:
+            if self.get_entry_type(select) != "Audio Source":
+                return
+        self.right_click_menu.add_cascade(menu=self.right_click_export_menu, 
+                                          label="Export")
+    """
+    End
+    """
+
+    """
+    Target Import Manifest Generation
+    """
+    def generate_target_import_manifest(self):
+        """
+        @exception
+        - AssertionError
+            - The length of stack is none zero after traversing a single entry
+        """
+        self.root.clipboard_clear()
+
+        stack: list[str] = []
+        pairs: list[str] = []
+        for select in self.treeview_selection_collaspe():
+            if len(stack) > 0:
+                raise AssertionError()
+
+            stack = [select]
+            while len(stack) > 0:
+                vid = stack.pop()
+
+                for child in self.treeview.get_children(vid):
+                    stack.append(child)
+
+                etype = self.get_entry_type(vid)
+                match etype:
+                    case "Audio Source":
+                        tid = self.get_entry_tag_id(vid)
+                        pairs.append(target_import_schema.pair_template.format(tid))
+
+        self.root.clipboard_append(target_import_schema.template % (",\n".join(pairs)))
+        self.root.update()
+    
+
 if __name__ == "__main__":
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
 
-    GAME_FILE_LOCATION = app_state.game_data_path
+    set_data_path(app_state.game_data_path)
 
     try:
-        if not os.path.exists(CACHE):
-            os.mkdir(CACHE, mode=0o777)
-    except Exception as e:
-        showerror("Error when initiating application", 
-                    "Failed to create application caching space")
+        if not os.path.exists(TMP):
+            os.mkdir(TMP, mode=0o777)
+    except OSError as err:
+        showerror("Application Setup Error", 
+                  f"Failed to create application tmp space. Reason: {err}")
         exit(1)
 
-    SYSTEM = platform.system()
-    if SYSTEM == "Windows":
-        VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
-        FFMPEG = "ffmpeg.exe"
-        try:
-            WWISE_CLI = os.path.join(os.environ["WWISEROOT"],
-                             "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
-        except:
-            pass
-    elif SYSTEM == "Linux":
-        VGMSTREAM = "vgmstream-linux/vgmstream-cli"
-        FFMPEG = "ffmpeg"
-        WWISE_CLI = ""
-        showwarning(title="Unsupported", message="Wwise integration is not " \
-            "supported for Linux. WAV file import is disabled")
-    elif SYSTEM == "Darwin":
-        VGMSTREAM = "vgmstream-macos/vgmstream-cli"
-        FFMPEG = "ffmpeg"
-        try:
-            p = next(pathlib.Path("/Applications/Audiokinetic").glob("Wwise*"))
-            WWISE_CLI = os.path.join(p, "Wwise.app/Contents/Tools/WwiseConsole.sh")
-        except:
-            pass
-    
-    if os.path.exists(WWISE_CLI):
-        if "Wwise2024" in WWISE_CLI:
-            WWISE_VERSION = "2024"
-        elif "Wwise2023" in WWISE_CLI:
-            WWISE_VERSION = "2023"
-    else:
-        WWISE_VERSION = ""
-        
     if not os.path.exists(VGMSTREAM):
         logger.error("Cannot find vgmstream distribution! " \
                      f"Ensure the {os.path.dirname(VGMSTREAM)} folder is " \
@@ -4624,7 +4647,7 @@ if __name__ == "__main__":
 
     lookup_store: db.LookupStore | None = None
     
-    if not os.path.exists(GAME_FILE_LOCATION):
+    if not os.path.exists(get_data_path()):
         showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
             " Audio archive search is disabled.")
     elif os.path.exists("hd_audio_db.db"):
@@ -4649,5 +4672,5 @@ if __name__ == "__main__":
     
     app_state.save_config()
 
-    if os.path.exists(CACHE):
-        shutil.rmtree(CACHE)
+    if os.path.exists(TMP):
+        shutil.rmtree(TMP)
