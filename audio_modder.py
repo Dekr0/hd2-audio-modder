@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import json
 import jsonschema
 import numpy
@@ -100,7 +101,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
         matching_items = self.get_items_by_path(event.src_path)
         for item in matching_items:
             self.workspace.delete(item)
-        
+       
     # moved/renamed WITHIN SAME DIRECTORY
     # changing directories will fire a created and deleted event
     def on_moved(self, event: FileSystemEvent) -> None:
@@ -2296,6 +2297,161 @@ class FileHandler:
             pass
 
     # [Target Automation]
+    async def target_import_automation_csv(self, csv_file: str):
+        """
+        @exception
+        - OSError -> caused by
+            - The provided CSV file doesn't exist.
+        """
+        if not os.path.exists(csv_file):
+            raise OSError(f"Target import CSV file {csv_file} does not exist.")
+
+        self.revert_all()
+
+        workspace = std_path(os.path.dirname(csv_file))
+        target_import_pairs: list[tuple[str, list[AudioSource]]] = []
+
+        # [Validation of CSV file]
+        with open(csv_file) as f:
+            reader = csv.reader(f)
+            line = 0
+            for row in reader:
+                try:
+                    pairs = self.validate_target_import_csv_row(workspace, row)
+                    if pairs != None:
+                        target_import_pairs.append(pairs)
+                except (OSError, SyntaxError, TypeError, ValueError) as err:
+                    logger.warning(f"At line {line}: {err}. Skipping this row "
+                                   "of target import.")
+
+                line += 1
+
+        target_import_pairs, conversion_schema = \
+                self.create_conversion_listing_csv(target_import_pairs)
+
+        tmp_dest = await self.convert_wav_to_wem(DEFAULT_WWISE_PROJECT, conversion_schema)
+
+        tmp_dest = os.path.join(tmp_dest, SYSTEM)
+        target_import_pairs = [(os.path.join(tmp_dest, output_wem), sources)
+                               for output_wem, sources in target_import_pairs]
+
+        for wem, audio_sources in target_import_pairs:
+            if not os.path.exists(wem):
+                logger.warning(f"Converted wem file {wem} does not exist."
+                               f"Skipping this target import pair.")
+                continue
+
+            audio_data: bytes
+            with open(wem, "rb") as f:
+                audio_data = f.read()
+
+            for audio_source in audio_sources:
+                audio_source.set_data(audio_data)
+
+
+    def validate_target_import_csv_row(self, workspace: str, row: list[str]) -> \
+            tuple[str, list[AudioSource]] | None:
+        """
+        Side Effect
+        - Input file path will be formatted.
+            - If it misses extension, assume wave file format.
+            - If it's relative path, it will join with the absolute directory path 
+            of provided CSV file.
+        - All provided audio source IDs will be used to fetch the AudioSource 
+        object
+
+        @param
+        - workspace: absolute directory path of provided CSV file
+
+        @return
+        - tuple[abs_path, set[Audio Source IDs]]
+
+        @exception
+        - OSError
+        - SyntaxError
+        - TypeError
+        - ValueError
+        """
+
+        # [Audio Source ID Validation]
+        def validate_source_ids(source_ids: list[str]) -> list[AudioSource]:
+            """
+            @exception
+            - TypeError -> caused by
+                - string to int conversion error
+            - ValueError -> caused by
+                - string to int conversion error
+                - An audio source ID does not have a physical audio source.
+            """
+            audio_source_ids: list[int] = [] 
+            audio_sources: list[AudioSource] = []
+            for c, source_id in enumerate(source_ids, start=2):
+                sid = int(source_id)
+                audio_source: AudioSource | None = self.get_audio_by_id(sid)
+                if audio_source == None:
+                    raise ValueError(f"Column {c}: audio source ID {sid} does not "
+                                     "have an physical audio source.")
+                if sid in audio_source_ids:
+                    continue
+
+                audio_source_ids.append(sid)
+                audio_sources.append(audio_source)
+
+            return audio_sources
+        # [End]
+
+        if len(row) < 2:
+            raise SyntaxError(f"Less than 2 columns of values.")
+
+        # [Check for file existence]
+        from_file, target_count_str = row[0:2]
+        _, ext = os.path.splitext(from_file)
+        if ext == "":
+            from_file += ".wav"
+        elif ext != ".wav":
+            raise NotImplementedError("Target import automation only supports "
+                                      "wave file format currently.")
+
+        if not os.path.isabs(from_file): 
+            from_file = std_path(os.path.join(workspace, from_file))
+        if not os.path.exists(from_file):
+            raise OSError(f"Audio file {from_file} doesn't exist.")
+
+        # [Check for target count mismatch]
+        target_count: int = 0
+        target_count = int(target_count_str)
+
+        if target_count != len(row) - 2:
+            raise ValueError(f"The number {target_count} of audio source IDs "
+                             f"specified mismtaches the number {len(row)} of "
+                             "audio source ID provided.")
+
+        audio_sources = validate_source_ids(row[2:]) 
+        
+        return (from_file, audio_sources)
+
+    def create_conversion_listing_csv(
+            self, target_import_pairs: list[tuple[str, list[AudioSource]]]):
+        conversion_schema = etree.Element("ExternalSourcesList", attrib={
+            "SchemaVersion": "1",
+            "Root": TMP
+        })
+        wem_sources_pairs: list[tuple[str, list[AudioSource]]] = []
+
+        for from_file, sources in target_import_pairs:
+            _, from_file_wem = os.path.splitdrive(from_file)
+            from_file_wem = from_file_wem.replace("/", "_")
+            from_file_wem += ".wem"
+            wem_sources_pairs.append((from_file_wem, sources))
+
+            etree.SubElement(conversion_schema, "Source", attrib={
+                "Path": os.path.abspath(from_file),
+                "Conversion": DEFAULT_CONVERSION_SETTING,
+                "Destination": from_file_wem 
+            })
+
+        return wem_sources_pairs, etree.ElementTree(conversion_schema)
+
     async def target_import_automation(self, manifest_path: str):
         """
         Target import automation does not support set duration yet.
@@ -2361,12 +2517,10 @@ class FileHandler:
             wem_source_pairs = [(os.path.join(tmp_dest, pair[0]), pair[1])
                                  for pair in wem_source_pairs]
 
-            for wem_sources_pair in wem_source_pairs:
-                wem = wem_sources_pair[0]
-                audio_sources = wem_sources_pair[1]
-                if not os.path.exists(wem_sources_pair[0]):
+            for wem, audio_sources in wem_source_pairs:
+                if not os.path.exists(wem):
                     logger.warning(f"Converted wem file {wem} does not exist."
-                                   f"Skipping target pair {wem_sources_pair}.")
+                                   f"Skipping this target import pair.")
                     continue
 
                 audio_data: bytes
@@ -2392,7 +2546,6 @@ class FileHandler:
                 logger.warning("Failed to remove temporary staging point for "
                                f"wave files to wem files conversion. Trace: {err}")
 
-
     def create_conversion_listing(self, target_imports) -> \
             tuple[ list[tuple[str, list[AudioSource]]], etree.ElementTree ]:
         """
@@ -2406,7 +2559,7 @@ class FileHandler:
             - etree.ElementTree - A XML schema used for Wwise Console during the 
             conversion
 
-        @exception - None
+        @exception - AssertionError
         """
         conversion_schema = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
@@ -2416,64 +2569,80 @@ class FileHandler:
         wem_sources_pairs: list[tuple[str, list[AudioSource]]] = []
         stack = []
         for target_import in target_imports:
+            if len(stack) > 0:
+                raise AssertionError("Previous target import parsing is not "
+                                     "complete.")
+
             stack.append(target_import)
+            while len(stack) > 0:
+                top_target_import = stack.pop()
 
-        while len(stack) > 0:
-            top_target_import = stack.pop()
+                workspace = top_target_import["workspace"]
+                folders = top_target_import["folders"]
 
-            workspace = top_target_import["workspace"]
-            folders = top_target_import["folders"]
-            if len(folders):
-                for folder in folders:
-                    folder["workspace"] = os.path.join(workspace, folder["workspace"])
-                    stack.append(folder)
+                # Recursive Case
+                if len(folders) > 0:
+                    for folder in folders:
+                        # Attach child workspace path with parent workspace path
+                        folder["workspace"] = os.path.join(workspace, folder["workspace"])
+                        stack.append(folder)
 
-            pairs = top_target_import["pairs"]
-            for pair in pairs:
-                from_file: str = fileutil.std_path(
-                    os.path.join(workspace, pair["from"])
-                )
+                pairs = top_target_import["pairs"]
+                for pair in pairs:
+                    from_file: str = fileutil.std_path(
+                        os.path.join(workspace, pair["from"])
+                    )
 
-                from_file_name, ext = os.path.splitext(from_file)
-                if ext == "":
-                    from_file += ".wav"
-                elif ext != ".wav":
-                    logger.warning(f"Target import {pair} fail. Reason: "
-                                   f"{from_file} is not in wave format.")
-                    continue
+                    from_file, ext = os.path.splitext(from_file)
 
-                if not os.path.exists(from_file):
-                    logger.warning(f"Target import {pair} fail. Reason: "
-                                   f"{from_file} does not exists.")
-                    continue
-
-                from_file_wem = from_file_name.replace(":/", "/")
-                from_file_wem = f"{from_file_wem.replace("/", "_")}.wem"
-
-                unique_audio_sources: dict[int, AudioSource] = {}
-                to: list[int] = pair["to"]
-                for source_id in to:
-                    audio_source: AudioSource | None = self.get_audio_by_id(source_id)
-                    if audio_source == None:
-                        logger \
-                            .warning(f"Audio source {source_id} provided in target import"
-                                     f"pair {pair} does not have a physical audio source."
-                                     " Removing this from the list.")
+                    # Attach missing wave file format extension
+                    if ext == "":
+                        from_file += ".wav"
+                    elif ext != ".wav":
+                        logger.warning(f"Target import {pair} fail. Reason: "
+                                       f"Target import automation only supports wave"
+                                       " file format currently.")
                         continue
-                    unique_audio_sources[source_id] = audio_source
 
-                if len(unique_audio_sources) <= 0:
-                    logger.warning(f"Target import {pair} fail. Reason: No valid "
-                                   "audio source is associated with this pair.")
-                    continue
+                    if not os.path.exists(from_file):
+                        logger.warning(f"Target import {pair} fail. Reason: "
+                                       f"{from_file} does not exists.")
+                        continue
 
-                etree.SubElement(conversion_schema, "Source", attrib={
-                    "Path": os.path.abspath(from_file),
-                    "Conversion": DEFAULT_CONVERSION_SETTING,
-                    "Destination": from_file_wem
-                })
+                    # File name of the conversion output
+                    _, from_file_wem = os.path.splitdrive(from_file)
+                    from_file_wem = from_file_wem.replace("/", "_")
+                    from_file_wem += ".wem"
 
-                wem_sources_pairs.append((from_file_wem, list(unique_audio_sources.values())))
+                    # Collect audio sources from the provided audio source IDs
+                    audio_source_ids: list[int] = []
+                    audio_sources: list[AudioSource] = []
+                    to: list[int] = pair["to"]
+                    for sid in to:
+                        audio_source: AudioSource | None = self.get_audio_by_id(sid)
+                        if audio_source == None:
+                            logger.warning(
+                                    f"Audio source {sid} provided in target import"
+                                    f"pair {pair} does not have a physical audio source."
+                                    " Removing this from the list.")
+                            continue
+                        if sid in audio_source_ids:
+                            continue
+                        audio_source_ids.append(sid)
+                        audio_sources.append(audio_source)
+
+                    if len(audio_sources) <= 0:
+                        logger.warning(f"Target import pair {pair} invalid. Reason: No "
+                                       "valid audio source is associated with this pair.")
+                        continue
+
+                    etree.SubElement(conversion_schema, "Source", attrib={
+                        "Path":std_path(os.path.abspath(from_file)),
+                        "Conversion": DEFAULT_CONVERSION_SETTING,
+                        "Destination": from_file_wem
+                    })
+
+                    wem_sources_pairs.append((from_file_wem, audio_sources))
 
         return wem_sources_pairs, etree.ElementTree(conversion_schema)
 
@@ -2487,7 +2656,7 @@ class FileHandler:
             to wem files conversion
             - writing a conversion schema to disk
         NotImplementedError -> caused by
-            - The current OS is not Windows or MacOS
+            - The current OS is not indows or MacOS
         ChildProcessErrors -> caused by
             - Wwise project migration has a return code of non zero.
             - Wwise wave files to wem files conversion has a return code of non
@@ -2498,8 +2667,6 @@ class FileHandler:
 
         uid = uuid.uuid4().hex
         tmp_dest = std_path(os.path.join(TMP, uid))
-
-        print(tmp_dest)
 
         # Unlikely
         if os.path.exists(tmp_dest):
@@ -3397,13 +3564,15 @@ class MainWindow:
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
 
-        self.right_click_copy_menu = Menu(self.right_click_menu, tearoff=0)
-        self.init_right_click_copy_menu()
+        self.rc_copy_target_import_menu = Menu(self.right_click_menu, tearoff=0)
+        self.init_rc_copy_target_import_menu()
 
-        self.right_click_export_menu = Menu(self.right_click_menu, tearoff=0)
-        self.init_right_click_export_menu()
+        self.rc_copy_menu = Menu(self.right_click_menu, tearoff=0)
+        self.rc_copy_plain_menu = Menu(self.rc_copy_menu, tearoff=0)
+        self.init_rc_copy_menu()
 
-        self.right_click_export_wav_menu = Menu(self.right_click_export_menu, tearoff=0)
+        self.rc_export_menu = Menu(self.right_click_menu, tearoff=0)
+        self.init_rc_export_menu()
 
         self.right_click_id = 0
 
@@ -3459,12 +3628,7 @@ class MainWindow:
             label="Import Audio Files",
             command=self.import_audio_files
         )
-        if os.path.exists(WWISE_CLI):
-            self.import_menu.add_command(
-                label="Target Import Automation",
-                command=self.target_import_automation
-            )
-            
+
         self.file_menu.add_cascade(
             menu=self.load_archive_menu, 
             label="Open"
@@ -3477,6 +3641,12 @@ class MainWindow:
             menu=self.import_menu,
             label="Import"
         )
+
+        if os.path.exists(WWISE_CLI):
+            self.automation_menu = Menu(self.menu, tearoff=0)
+            self.target_import_menu = Menu(self.automation_menu, tearoff=0)
+            self.init_automation_menu()
+            
         
         self.file_menu.add_command(label="Save", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
@@ -3493,6 +3663,8 @@ class MainWindow:
         self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
         
         self.menu.add_cascade(label="File", menu=self.file_menu)
+        if os.path.exists(WWISE_CLI):
+            self.menu.add_cascade(label="Automation", menu=self.automation_menu)
         self.menu.add_cascade(label="Edit", menu=self.edit_menu)
         self.menu.add_cascade(label="Dump", menu=self.dump_menu)
         self.menu.add_cascade(label="View", menu=self.view_menu)
@@ -3515,6 +3687,7 @@ class MainWindow:
 
         self.root.resizable(True, True)
         self.root.mainloop()
+
 
     def workspace_drag_assist(self, event):
         selected_item = self.workspace.identify_row(event.y)
@@ -3879,25 +4052,6 @@ class MainWindow:
         os.rename(filename, new_name)
         self.import_files([new_name])
         os.rename(new_name, old_name)
-
-    def target_import_automation(self):
-        if not os.path.exists(WWISE_CLI):
-            showwarning(
-                "Unsupported Operation", 
-                "Missing installation of WwiseConsole")
-            return
-
-        filename = askopenfilename(
-            title="Select target import automation manifest", 
-            filetypes=[("JSON file", "*.json")]
-        )
-        if not filename:
-            return
-        try:
-            asyncio.run(file_handler.target_import_automation(filename))
-            self.check_modified()
-        except Exception as err:
-            showerror("Target Import Automation Error", str(err))
 
     def treeview_on_right_click(self, event):
         try:
@@ -4433,6 +4587,44 @@ class MainWindow:
         self.root.clipboard_append("\n".join(content))
         self.root.update()
 
+    def copy_id_as_csv(self):
+        self.root.clipboard_clear()
+
+        stack: list[str] = []
+        csvs = "Label,Audio Source ID,Play At (ms),Duration (ms),Start Trim (ms)"
+        ",End Trim(ms)\n"
+        for select in self.treeview_selection_collaspe():
+            if len(stack) > 0:
+                raise AssertionError()
+
+            stack = [select]
+            while len(stack) > 0:
+                vid = stack.pop()
+
+                for child in self.treeview.get_children(vid):
+                    stack.append(child)
+
+                etype = self.get_entry_type(vid)
+                match etype:
+                    case "Audio Source":
+                        tid = self.get_entry_tag_id(vid)
+                        audio_source: AudioSource | None = self.file_handler \
+                                                        .get_audio_by_id(int(tid))
+                        if audio_source == None:
+                            continue
+                        csvs += f",{tid},"
+
+                        track_info: TrackInfoStruct | None = audio_source.get_track_info()
+                        if isinstance(track_info, TrackInfoStruct):
+                            csvs += f"{track_info.play_at},{track_info.source_duration},"
+                            f"{track_info.begin_trim_offset},{track_info.end_trim_offset}\n"
+                        else:
+                            csvs += f",,,\n"
+
+
+        self.root.clipboard_append(csvs)
+        self.root.update()
+
     def copy_id_tree(self, with_descendant: bool):
         """
         Copy IDs of entry (including all its children)
@@ -4484,22 +4676,40 @@ class MainWindow:
     """
     Treeview Right Click Menu Overhaul
     """
-    def init_right_click_copy_menu(self):
-        self.right_click_copy_menu.add_command(
-                label="Linear",
-                command=self.copy_id_linear,
+    def init_rc_copy_target_import_menu(self):
+        self.rc_copy_target_import_menu.add_command(
+            label="As CSV",
+            command=self.generate_target_import_csv
         )
-        self.right_click_copy_menu.add_command(
+        self.rc_copy_target_import_menu.add_command(
+            label="As JSON",
+            command=self.generate_target_import_manifest
+        )
+
+    def init_rc_copy_menu(self):
+        self.rc_copy_menu.add_command(
+            label="As CSV",
+            command=self.copy_id_as_csv
+        )
+        self.rc_copy_plain_menu.add_command(
+            label="Linear",
+            command=self.copy_id_linear,
+        )
+        self.rc_copy_plain_menu.add_command(
             label="Tree Structure With Descendant",
             command=lambda: self.copy_id_tree(True)
         )
-        self.right_click_copy_menu.add_command(
+        self.rc_copy_plain_menu.add_command(
             label="Tree Structure With No Descendant",
             command=lambda: self.copy_id_tree(False)
         )
+        self.rc_copy_menu.add_cascade(
+            label="As Plain Text",
+            menu=self.rc_copy_plain_menu
+        )
 
-    def init_right_click_export_menu(self):
-        self.right_click_export_menu.add_command(
+    def init_rc_export_menu(self):
+        self.rc_export_menu.add_command(
             label="As Wwise Encoded Meida (wem)",
             command=self.dump_as_wem
         )
@@ -4507,30 +4717,30 @@ class MainWindow:
         if not os.path.exists(VGMSTREAM):
             return
 
-        self.right_click_export_menu.add_command(
+        self.rc_export_menu.add_command(
             label="As Wave File (wav)",
             command=self.dump_as_wav
         )
-        self.right_click_export_menu.add_command(
+        self.rc_export_menu.add_command(
             label="As Wave File (wav) With Sequence Suffix",
             command=lambda: self.dump_as_wav(with_seq=True)
         )
-        self.right_click_export_menu.add_command(
+        self.rc_export_menu.add_command(
             label="As Wave File (wav) (0.1 Second Muted)",
             command=lambda: self.dump_as_wav(muted=True)
         )
-        self.right_click_export_menu.add_command(
+        self.rc_export_menu.add_command(
             label="As Wave File (wav) (Muted) With Sequence Suffix",
             command=lambda: self.dump_as_wav(muted=True, with_seq=True)
         )
 
     def new_treeview_on_right_click(self, ev):
         self.right_click_menu.delete(0, "end")
-        self.right_click_menu.add_command(
-            label="Generate Target Import Manifest (Selected)",
-            command=self.generate_target_import_manifest
+        self.right_click_menu.add_cascade(
+            label="Generate Target Import Automation Data",
+            menu=self.rc_copy_target_import_menu,
         )
-        self.right_click_menu.add_cascade(menu=self.right_click_copy_menu, 
+        self.right_click_menu.add_cascade(menu=self.rc_copy_menu, 
                                           label="Copy IDs")
         self.add_import_export_option()
         self.right_click_menu.tk_popup(ev.x_root, ev.y_root)
@@ -4565,7 +4775,7 @@ class MainWindow:
         for select in selects:
             if self.get_entry_type(select) != "Audio Source":
                 return
-        self.right_click_menu.add_cascade(menu=self.right_click_export_menu, 
+        self.right_click_menu.add_cascade(menu=self.rc_export_menu, 
                                           label="Export")
     """
     End
@@ -4574,6 +4784,36 @@ class MainWindow:
     """
     Target Import Manifest Generation
     """
+    def generate_target_import_csv(self):
+        """
+        @exception
+        - AssertionError
+            - The length of stack is none zero after traversing a single entry
+        """
+        self.root.clipboard_clear()
+
+        stack: list[str] = []
+        csvs = ""
+        for select in self.treeview_selection_collaspe():
+            if len(stack) > 0:
+                raise AssertionError()
+
+            stack = [select]
+            while len(stack) > 0:
+                vid = stack.pop()
+
+                for child in self.treeview.get_children(vid):
+                    stack.append(child)
+
+                etype = self.get_entry_type(vid)
+                match etype:
+                    case "Audio Source":
+                        tid = self.get_entry_tag_id(vid)
+                        csvs += f",1,{tid}\n"
+
+        self.root.clipboard_append(csvs)
+        self.root.update()
+
     def generate_target_import_manifest(self):
         """
         @exception
@@ -4603,7 +4843,83 @@ class MainWindow:
 
         self.root.clipboard_append(target_import_schema.template % (",\n".join(pairs)))
         self.root.update()
-    
+
+    """
+    Automation Menu
+    """
+    def init_automation_menu(self):
+        self.target_import_menu.add_command(
+            label="Using CSV File",
+            command=self.target_import_automation_csv
+        )
+        self.target_import_menu.add_command(
+            label="Using Manifest File",
+            command=self.target_import_automation
+        )
+        self.automation_menu.add_cascade(
+            label="Target Import", 
+            menu=self.target_import_menu)
+        self.automation_menu.add_command(
+            label="Patch Generation",
+            command=self.patch_automation
+        )
+
+    def target_import_automation(self):
+        if not os.path.exists(WWISE_CLI):
+            showwarning(
+                "Unsupported Operation", 
+                "Missing installation of WwiseConsole")
+            return
+
+        filename = askopenfilename(
+            title="Select target import automation manifest", 
+            filetypes=[("JSON file", "*.json")]
+        )
+        if not filename:
+            return
+        try:
+            asyncio.run(file_handler.target_import_automation(filename))
+            self.check_modified()
+        except Exception as err:
+            showerror("Target Import Automation Error", str(err))
+
+    def target_import_automation_csv(self):
+        if not os.path.exists(WWISE_CLI):
+            showwarning(
+                "Unsupported Operation", 
+                "Missing installation of WwiseConsole")
+            return
+        filename = askopenfilename(
+            title="Select target import csv file",
+            filetypes=[("CSV file", "*.csv")]
+        )
+        if not filename:
+            return
+        try:
+            asyncio.run(file_handler.target_import_automation_csv(filename))
+            self.check_modified()
+        except Exception as err:
+            showerror("Target Import Automation Error", str(err))
+
+    def patch_automation(self):
+        if not os.path.exists(WWISE_CLI):
+            showwarning(
+                "Unsupported Operation", 
+                "Missing installation of WwiseConsole")
+            return
+        filename = askopenfilename(
+            title="Select patch automation manifest file",
+            filetypes=[("JSON file", "*.json")]
+        )
+        if not filename:
+            return
+        try:
+            file_handler.patch_automation(filename)
+        except Exception as err:
+            showerror("Target Import Automation Error", str(err))
+    """
+    End
+    """
 
 if __name__ == "__main__":
     app_state: cfg.Config | None = cfg.load_config()
