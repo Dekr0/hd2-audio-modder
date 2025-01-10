@@ -12,8 +12,8 @@ DIR = std_path(os.path.dirname(__file__))
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     DIR = os.path.dirname(sys.argv[0])
 
-CACHE = os.path.join(DIR, ".cache")
-TMP = os.path.join(DIR, ".tmp")
+CACHE = std_path(os.path.join(DIR, ".cache"))
+TMP = std_path(os.path.join(DIR, ".tmp"))
 
 DEFAULT_WWISE_PROJECT = os.path.join(
     DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj")
