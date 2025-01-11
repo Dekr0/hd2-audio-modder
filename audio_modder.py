@@ -5,6 +5,7 @@ import jsonschema
 import numpy
 import os
 import platform
+import posixpath
 import pyaudio
 import shutil
 import struct
@@ -25,11 +26,10 @@ from tkinterdnd2 import *
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
-from tkinter.messagebox import askokcancel
-from tkinter.messagebox import showwarning
-from tkinter.messagebox import showerror
 from tkinter.messagebox import askyesnocancel
+from tkinter.messagebox import showwarning, showerror
 from tkinter.filedialog import askopenfilename
+from tkinter.simpledialog import askstring
 from typing import Any, Literal, Callable, Union
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -38,6 +38,7 @@ import config as cfg
 import db
 import log
 import fileutil
+import mod_manifest_schema
 import patch_automate_schema
 import target_import_schema
 
@@ -2112,45 +2113,46 @@ class FileHandler:
         progress_window.destroy()
         return True
 
-    def write_patch(self, folder=None):
-        if folder == None:
-            folder = filedialog.askdirectory(title="Select folder to save files to")
-        if os.path.exists(folder):
-            patch_file_reader = FileReader()
-            patch_file_reader.name = self.file_reader.name + ".patch_0"
-            patch_file_reader.magic = self.file_reader.magic
-            patch_file_reader.num_types = 0
-            patch_file_reader.num_files = 0
-            patch_file_reader.unknown = self.file_reader.unknown
-            patch_file_reader.unk4Data = self.file_reader.unk4Data
-            patch_file_reader.audio_sources = self.file_reader.audio_sources
-            patch_file_reader.string_entries = self.file_reader.string_entries
-            patch_file_reader.music_track_events = self.file_reader.music_track_events
-            patch_file_reader.music_segments = self.file_reader.music_segments
-            patch_file_reader.wwise_banks = {}
-            patch_file_reader.wwise_streams = {}
-            patch_file_reader.text_banks = {}
-            
-            for key, value in self.file_reader.wwise_streams.items():
-                if value.content.modified:
-                    patch_file_reader.wwise_streams[key] = value
-                    
-            for key, value in self.file_reader.wwise_banks.items():
-                if value.modified:
-                    patch_file_reader.wwise_banks[key] = value
-                    
-            for key, value in self.file_reader.text_banks.items():
-                for string_id in value.string_ids:
-                    if self.file_reader.string_entries[value.language][string_id].modified:
-                        patch_file_reader.text_banks[key] = value
-                        break
+    def write_patch(self, dest: str):
+        """
+        @exception
+        - OSError -> caused by
+            - The provided destination does not exist.
+        """
+        if not os.path.exists(dest):
+            raise OSError(f"The provided destination {dest} does not exist.")
+
+        patch_file_reader = FileReader()
+        patch_file_reader.name = self.file_reader.name + ".patch_0"
+        patch_file_reader.magic = self.file_reader.magic
+        patch_file_reader.num_types = 0
+        patch_file_reader.num_files = 0
+        patch_file_reader.unknown = self.file_reader.unknown
+        patch_file_reader.unk4Data = self.file_reader.unk4Data
+        patch_file_reader.audio_sources = self.file_reader.audio_sources
+        patch_file_reader.string_entries = self.file_reader.string_entries
+        patch_file_reader.music_track_events = self.file_reader.music_track_events
+        patch_file_reader.music_segments = self.file_reader.music_segments
+        patch_file_reader.wwise_banks = {}
+        patch_file_reader.wwise_streams = {}
+        patch_file_reader.text_banks = {}
+        
+        for key, value in self.file_reader.wwise_streams.items():
+            if value.content.modified:
+                patch_file_reader.wwise_streams[key] = value
+                
+        for key, value in self.file_reader.wwise_banks.items():
+            if value.modified:
+                patch_file_reader.wwise_banks[key] = value
+                
+        for key, value in self.file_reader.text_banks.items():
+            for string_id in value.string_ids:
+                if self.file_reader.string_entries[value.language][string_id].modified:
+                    patch_file_reader.text_banks[key] = value
+                    break
      
-            patch_file_reader.rebuild_headers()
-            patch_file_reader.to_file(folder)
-        else:
-            print("Invalid folder selected, aborting save")
-            return False
-        return True
+        patch_file_reader.rebuild_headers()
+        patch_file_reader.to_file(dest)
 
     def load_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None, set_duration=True): 
         if wems == None:
@@ -2299,6 +2301,9 @@ class FileHandler:
     # [Target Automation]
     async def target_import_automation_csv(self, csv_file: str):
         """
+        @param
+        - csv_file -> absolute path (Windows or POSIX) or relative path
+
         @exception
         - OSError -> caused by
             - The provided CSV file doesn't exist.
@@ -2307,8 +2312,11 @@ class FileHandler:
             raise OSError(f"Target import CSV file {csv_file} does not exist.")
 
         self.revert_all()
+        
+        if not posixpath.isabs(csv_file):
+            csv_file = fileutil.to_posix(os.path.abspath(csv_file))
+        workspace = posixpath.dirname(csv_file)
 
-        workspace = std_path(os.path.dirname(csv_file))
         target_import_pairs: list[tuple[str, list[AudioSource]]] = []
 
         # [Validation of CSV file]
@@ -2326,13 +2334,13 @@ class FileHandler:
 
                 line += 1
 
-        target_import_pairs, conversion_schema = \
-                self.create_conversion_listing_csv(target_import_pairs)
+        conversion_schema = self.create_conversion_listing_csv(target_import_pairs)
 
-        tmp_dest = await self.convert_wav_to_wem(DEFAULT_WWISE_PROJECT, conversion_schema)
+        tmp_dest = await self.convert_wav_to_wem(DEFAULT_WWISE_PROJECT,
+                                                 conversion_schema)
 
-        tmp_dest = os.path.join(tmp_dest, SYSTEM)
-        target_import_pairs = [(os.path.join(tmp_dest, output_wem), sources)
+        tmp_dest = posixpath.join(tmp_dest, SYSTEM)
+        target_import_pairs = [(posixpath.join(tmp_dest, output_wem), sources)
                                for output_wem, sources in target_import_pairs]
 
         for wem, audio_sources in target_import_pairs:
@@ -2348,11 +2356,10 @@ class FileHandler:
             for audio_source in audio_sources:
                 audio_source.set_data(audio_data)
 
-
     def validate_target_import_csv_row(self, workspace: str, row: list[str]) -> \
             tuple[str, list[AudioSource]] | None:
         """
-        Side Effect
+        @side_effect
         - Input file path will be formatted.
             - If it misses extension, assume wave file format.
             - If it's relative path, it will join with the absolute directory path 
@@ -2361,10 +2368,10 @@ class FileHandler:
         object
 
         @param
-        - workspace: absolute directory path of provided CSV file
+        - workspace: absolute directory path of provided CSV file (POSIX)
 
         @return
-        - tuple[abs_path, set[Audio Source IDs]]
+        - tuple[posix_abs_path, set[Audio Source IDs]]
 
         @exception
         - OSError
@@ -2373,39 +2380,12 @@ class FileHandler:
         - ValueError
         """
 
-        # [Audio Source ID Validation]
-        def validate_source_ids(source_ids: list[str]) -> list[AudioSource]:
-            """
-            @exception
-            - TypeError -> caused by
-                - string to int conversion error
-            - ValueError -> caused by
-                - string to int conversion error
-                - An audio source ID does not have a physical audio source.
-            """
-            audio_source_ids: list[int] = [] 
-            audio_sources: list[AudioSource] = []
-            for c, source_id in enumerate(source_ids, start=2):
-                sid = int(source_id)
-                audio_source: AudioSource | None = self.get_audio_by_id(sid)
-                if audio_source == None:
-                    raise ValueError(f"Column {c}: audio source ID {sid} does not "
-                                     "have an physical audio source.")
-                if sid in audio_source_ids:
-                    continue
-
-                audio_source_ids.append(sid)
-                audio_sources.append(audio_source)
-
-            return audio_sources
-        # [End]
-
         if len(row) < 2:
             raise SyntaxError(f"Less than 2 columns of values.")
 
         # [Check for file existence]
         from_file, target_count_str = row[0:2]
-        _, ext = os.path.splitext(from_file)
+        _, ext = posixpath.splitext(from_file)
         if ext == "":
             from_file += ".wav"
         elif ext != ".wav":
@@ -2413,7 +2393,8 @@ class FileHandler:
                                       "wave file format currently.")
 
         if not os.path.isabs(from_file): 
-            from_file = std_path(os.path.join(workspace, from_file))
+            from_file = posixpath.join(workspace, from_file)
+
         if not os.path.exists(from_file):
             raise OSError(f"Audio file {from_file} doesn't exist.")
 
@@ -2426,23 +2407,51 @@ class FileHandler:
                              f"specified mismtaches the number {len(row)} of "
                              "audio source ID provided.")
 
-        audio_sources = validate_source_ids(row[2:]) 
+        audio_sources = self.validate_source_ids(row[2:]) 
         
         return (from_file, audio_sources)
 
+    def validate_source_ids(self, source_ids: list[str]) -> list[AudioSource]:
+        """
+        @exception
+        - TypeError -> caused by
+            - string to int conversion error
+        - ValueError -> caused by
+            - string to int conversion error
+            - An audio source ID does not have a physical audio source.
+        """
+        audio_source_ids: list[int] = [] 
+        audio_sources: list[AudioSource] = []
+        for c, source_id in enumerate(source_ids, start=2):
+            sid = int(source_id)
+            audio_source: AudioSource | None = self.get_audio_by_id(sid)
+            if audio_source == None:
+                raise ValueError(f"Column {c}: audio source ID {sid} does not "
+                                 "have an physical audio source.")
+            if sid in audio_source_ids:
+                continue
+
+            audio_source_ids.append(sid)
+            audio_sources.append(audio_source)
+
+        return audio_sources
+
     def create_conversion_listing_csv(
             self, target_import_pairs: list[tuple[str, list[AudioSource]]]):
+        """
+        @side_effect
+        - For each target import pair, the absolute path of input wave file 
+        change to the absolute path of output Wwise Encoding Media file
+        """
         conversion_schema = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": TMP
         })
-        wem_sources_pairs: list[tuple[str, list[AudioSource]]] = []
 
-        for from_file, sources in target_import_pairs:
+        for i, (from_file, sources) in enumerate(target_import_pairs):
             _, from_file_wem = os.path.splitdrive(from_file)
-            from_file_wem = from_file_wem.replace("/", "_")
-            from_file_wem += ".wem"
-            wem_sources_pairs.append((from_file_wem, sources))
+            from_file_wem = from_file_wem.replace("/", "_") + ".wem"
+            target_import_pairs[i] = (from_file_wem, sources)
 
             etree.SubElement(conversion_schema, "Source", attrib={
                 "Path": os.path.abspath(from_file),
@@ -2450,7 +2459,7 @@ class FileHandler:
                 "Destination": from_file_wem 
             })
 
-        return wem_sources_pairs, etree.ElementTree(conversion_schema)
+        return etree.ElementTree(conversion_schema)
 
     async def target_import_automation(self, manifest_path: str):
         """
@@ -2513,8 +2522,8 @@ class FileHandler:
             if revert_before:
                 self.revert_all()
 
-            tmp_dest = os.path.join(tmp_dest, SYSTEM)
-            wem_source_pairs = [(os.path.join(tmp_dest, pair[0]), pair[1])
+            tmp_dest = posixpath.join(tmp_dest, SYSTEM)
+            wem_source_pairs = [(posixpath.join(tmp_dest, pair[0]), pair[1])
                                  for pair in wem_source_pairs]
 
             for wem, audio_sources in wem_source_pairs:
@@ -2584,16 +2593,15 @@ class FileHandler:
                 if len(folders) > 0:
                     for folder in folders:
                         # Attach child workspace path with parent workspace path
-                        folder["workspace"] = os.path.join(workspace, folder["workspace"])
+                        folder["workspace"] = posixpath.join(workspace, 
+                                                             folder["workspace"])
                         stack.append(folder)
 
                 pairs = top_target_import["pairs"]
                 for pair in pairs:
-                    from_file: str = fileutil.std_path(
-                        os.path.join(workspace, pair["from"])
-                    )
+                    from_file: str = posixpath.join(workspace, pair["from"])
 
-                    from_file, ext = os.path.splitext(from_file)
+                    from_file, ext = posixpath.splitext(from_file)
 
                     # Attach missing wave file format extension
                     if ext == "":
@@ -2637,7 +2645,7 @@ class FileHandler:
                         continue
 
                     etree.SubElement(conversion_schema, "Source", attrib={
-                        "Path":std_path(os.path.abspath(from_file)),
+                        "Path": fileutil.to_posix(os.path.abspath(from_file)),
                         "Conversion": DEFAULT_CONVERSION_SETTING,
                         "Destination": from_file_wem
                     })
@@ -2666,7 +2674,7 @@ class FileHandler:
             os.mkdir(TMP)
 
         uid = uuid.uuid4().hex
-        tmp_dest = std_path(os.path.join(TMP, uid))
+        tmp_dest = posixpath.join(TMP, uid)
 
         # Unlikely
         if os.path.exists(tmp_dest):
@@ -2674,14 +2682,12 @@ class FileHandler:
 
         os.mkdir(tmp_dest)
 
-        project = std_path(os.path.abspath(project))
+        if not os.path.isabs(project):
+            project = fileutil.to_posix(os.path.abspath(project))
 
         etree.indent(conversion_schema, space="    ", level=0)
-        conversion_schema_path = os.path.abspath(os.path.join(
-            tmp_dest, "conversion_schema.xml"))
-        conversion_schema.write(conversion_schema_path, 
-                                encoding="utf-8", 
-                                xml_declaration=True)
+        conversion_schema_path = posixpath.join(tmp_dest, "conversion_schema.xml")
+        conversion_schema.write(conversion_schema_path, encoding="utf-8", xml_declaration=True)
         
         system = platform.system()
 
@@ -2703,7 +2709,7 @@ class FileHandler:
             *[
                  "convert-external-source", project,
                  "--platform", "Windows",
-                 "--source-file", os.path.abspath(conversion_schema_path),
+                 "--source-file", conversion_schema_path,
                  "--output", tmp_dest,
             ]
         )
@@ -2827,7 +2833,7 @@ class FileHandler:
             logger.info("The file path for archive files lookup does not exist."
                         " Using data directory for Helldivers 2 for archive files"
                         "lookup instead...")
-            data = os.environ.get("HD2DATA")
+            data = get_data_path() 
             if data == None:
                 logger.warning("HD2DATA enviromental variable is not set.")
                 logger.warning("No archive files lookup source. Skipping the"
@@ -2839,7 +2845,7 @@ class FileHandler:
                 logger.warning(f"Double check the HD2DATA environmental variable.")
                 return None
         else:
-            data = std_path(os.path.abspath(task["data"]))
+            data = fileutil.to_posix(os.path.abspath(task["data"]))
             if not os.path.exists(task["data"]):
                 logger.warning(f"The file path {data} for archive files lookup"
                                " does not exist. Skipping the current task.")
@@ -2847,8 +2853,7 @@ class FileHandler:
 
         archive_files = set()
         for archive_file in task["archive_files"]:
-            archive_file = std_path(os.path.abspath(os.path.join(data, 
-                                                                 archive_file)))
+            archive_file = posixpath.join(data, archive_file)
             if not os.path.exists(archive_file):
                 logger.warning(f"Archive file {archive_file} does not exists."
                                "Skipping this archive file.")
@@ -2871,7 +2876,7 @@ class FileHandler:
 
         usings = set()
         for using in task["using"]:
-            using = std_path(os.path.abspath(os.path.join(workspace, using)))
+            using = posixpath.join(workspace, using)
             if not os.path.exists(using):
                 logger.warning(f"The provided target import automation manifest {using}"
                                " does not exist. Skipping this target import "
@@ -2887,6 +2892,52 @@ class FileHandler:
 
         return self.PatchAuotmationTask(archive_files, usings)
 
+    """
+    Patch Generation Helper
+    """
+    def generate_simple_patch_manifest(self, dest: str, name: str, description: str = ""):
+        """
+        @exception:
+        - OSError
+        """
+        if not os.path.exists(dest):
+            raise OSError(f"Patch generation destination {dest} does not exist.")
+
+        manifest = mod_manifest_schema.manifest_template
+        manifest["Guid"] = uuid.uuid4().hex
+        manifest["Name"] = name
+        manifest["Description"] = description
+        manifest["Options"][0]["Name"] = f"{name} (Main Variant)"
+
+        with open(posixpath.join(dest, "mainfest.json"), "w") as f:
+            json.dump(manifest, f, indent="    ")
+
+    def write_patch_with_manifest(self, dest: str, name: str, description: str = ""):
+        """
+        @param
+        dest: str -> absolute directory path
+        name: str -> name of the mod that contains the patch being generated
+        description: str
+
+        @exception
+        - OSError
+        """
+        dest = fileutil.to_posix(dest)
+        mod_folder = posixpath.join(dest, name)
+
+        if os.path.exists(mod_folder):
+            raise OSError(f"An existing mod folder is in the provided destination.")
+        os.mkdir(mod_folder)
+
+        main_variant_folder = posixpath.join(mod_folder, "main_variant")
+        os.mkdir(main_variant_folder)
+
+        self.write_patch(main_variant_folder)
+
+        self.generate_simple_patch_manifest(mod_folder, name, description)
+    """
+    End
+    """
 
 class ProgressWindow:
     def __init__(self, title, max_progress):
@@ -3597,62 +3648,23 @@ class MainWindow:
         
         self.language_menu = Menu(self.options_menu, tearoff=0)
         
+        """
+        File Menu
+        """
         self.file_menu = Menu(self.menu, tearoff=0)
-
+        self.load_archive_menu = Menu(self.file_menu, tearoff=0)
         self.recent_file_menu = Menu(self.file_menu, tearoff=0)
-
-        self.load_archive_menu = Menu(self.menu, tearoff=0)
-        if os.path.exists(get_data_path()):
-            self.load_archive_menu.add_command(
-                label="From HD2 Data Folder",
-                command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
-            )
-        self.load_archive_menu.add_command(
-            label="From File Explorer",
-            command=self.load_archive
-        )
-
-        for item in reversed(self.app_state.recent_files):
-            item = os.path.normpath(item)
-            self.recent_file_menu.add_command(
-                label=item,
-                command=partial(self.load_archive, "", item)
-            )
-
-        self.import_menu = Menu(self.menu, tearoff=0)
-        self.import_menu.add_command(
-            label="Import Patch File",
-            command=self.load_patch
-        )
-        self.import_menu.add_command(
-            label="Import Audio Files",
-            command=self.import_audio_files
-        )
-
-        self.file_menu.add_cascade(
-            menu=self.load_archive_menu, 
-            label="Open"
-        )
-        self.file_menu.add_cascade(
-            menu=self.recent_file_menu,
-            label="Open Recent"
-        )
-        self.file_menu.add_cascade(
-            menu=self.import_menu,
-            label="Import"
-        )
+        self.import_menu = Menu(self.file_menu, tearoff=0)
+        self.patch_menu = Menu(self.file_menu, tearoff=0)
+        self.init_file_menu()
+        """
+        End
+        """
 
         if os.path.exists(WWISE_CLI):
             self.automation_menu = Menu(self.menu, tearoff=0)
             self.target_import_menu = Menu(self.automation_menu, tearoff=0)
             self.init_automation_menu()
-            
-        
-        self.file_menu.add_command(label="Save", command=self.save_archive)
-        self.file_menu.add_command(label="Write Patch", command=self.write_patch)
-        
-        self.file_menu.add_command(label="Add a Folder to Workspace",
-                                   command=self.add_new_workspace)
         
         self.edit_menu = Menu(self.menu, tearoff=0)
         self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
@@ -3688,6 +3700,72 @@ class MainWindow:
         self.root.resizable(True, True)
         self.root.mainloop()
 
+    """
+    Grouping Menu Initialization
+    """
+    def init_file_menu(self):
+        self.init_load_archive_menu()
+        self.init_import_menu()
+        self.init_patch_menu()
+
+        self.file_menu.add_cascade(
+            menu=self.load_archive_menu, 
+            label="Open"
+        )
+        self.file_menu.add_cascade(
+            menu=self.recent_file_menu,
+            label="Open Recent"
+        )
+        self.file_menu.add_cascade(
+            menu=self.import_menu,
+            label="Import"
+        )
+        self.file_menu.add_cascade(
+            menu=self.patch_menu,
+            label="Write Patch"
+        )
+
+        self.file_menu.add_command(label="Save", command=self.save_archive)
+        self.file_menu.add_command(label="Add a Folder to Workspace",
+                                   command=self.add_new_workspace)
+
+    def init_load_archive_menu(self):
+        if os.path.exists(get_data_path()):
+            self.load_archive_menu.add_command(
+                label="From HD2 Data Folder",
+                command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
+            )
+        self.load_archive_menu.add_command(
+            label="From File Explorer",
+            command=self.load_archive
+        )
+
+        for item in reversed(self.app_state.recent_files):
+            item = os.path.normpath(item)
+            self.recent_file_menu.add_command(
+                label=item,
+                command=partial(self.load_archive, "", item)
+            )
+    
+    def init_import_menu(self):
+        self.import_menu.add_command(
+            label="Import Patch File",
+            command=self.load_patch
+        )
+        self.import_menu.add_command(
+            label="Import Audio Files",
+            command=self.import_audio_files
+        )
+
+    def init_patch_menu(self):
+        self.patch_menu.add_command(
+            label="Without Manifest",
+            command=self.write_patch
+        )
+        self.patch_menu.add_command(
+            label="With Manifest",
+            command=self.write_patch_with_manifest,
+        )
 
     def workspace_drag_assist(self, event):
         selected_item = self.workspace.identify_row(event.y)
@@ -4511,7 +4589,42 @@ class MainWindow:
         
     def write_patch(self):
         self.sound_handler.kill_sound()
-        self.file_handler.write_patch()
+
+        patch_location = filedialog.askdirectory(
+            title="Select a folder to generate a patch"
+        )
+        if patch_location == "":
+            return
+
+        try:
+            self.file_handler.write_patch(patch_location)
+        except Exception as err:
+            showerror("Patch Generation Error", str(err))
+
+    def write_patch_with_manifest(self):
+        self.sound_handler.kill_sound()
+
+        patch_location = filedialog.askdirectory(
+            title="Select a folder to generate a patch"
+        )
+        if patch_location == "":
+            return
+
+        title = "Manifest Generation"
+        name = askstring(title, "Enter Mod Name")
+        if name == None:
+            showwarning("Manifest Generation Cancel", "The name for a mod must be included.")
+            return
+
+        desc = askstring(title, "Enter Description (Optional)")
+        if desc == None:
+            desc = ""
+
+        try:
+            self.file_handler.write_patch_with_manifest(
+                patch_location, name, desc)
+        except Exception as err:
+            showerror("Manifest Generation Error", str(err))
         
     def load_patch(self):
         self.sound_handler.kill_sound()
