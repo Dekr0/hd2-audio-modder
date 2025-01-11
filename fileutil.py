@@ -48,7 +48,7 @@ def traverse(node):
                 stack.append(node)
 
 
-def std_path(p: str) -> str:
+def to_posix(p: str) -> str:
     match SYSTEM:
         case "Windows":
             return pathlib.PureWindowsPath(p).as_posix()
