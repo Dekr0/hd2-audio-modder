@@ -1,6 +1,8 @@
 import shutil
 import unittest
 
+import fileutil
+
 from audio_modder import AudioSource, FileHandler
 from env import *
 
@@ -139,13 +141,13 @@ class TargetImportAutomateTest(unittest.TestCase):
         ]
 
         match_cases = [(
-            std_path(os.path.abspath(f"test_mockup/{test_case[0]}.wav")), 
+            fileutil.to_posix(os.path.abspath(f"test_mockup/{test_case[0]}.wav")), 
             list([handler.get_audio_by_id(int(sid)) for sid in test_case[2:]])) 
             for test_case in test_cases]
 
         for i, test_case in enumerate(test_cases):
             pairs = handler.validate_target_import_csv_row(
-                    std_path(os.path.abspath("test_mockup")), test_case)
+                    fileutil.to_posix(os.path.abspath("test_mockup")), test_case)
             self.assertEqual(match_cases[i], pairs)
 
     def test_target_import_automate_csv_validation_fail(self):
