@@ -1,21 +1,22 @@
 import os
 import pathlib
 import platform
+import posixpath
 import sys
 
-from fileutil import std_path
+import fileutil
 import one_shot_ui
 
 from log import logger
 
-DIR = std_path(os.path.dirname(__file__))
+DIR = fileutil.to_posix(os.path.dirname(__file__))
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    DIR = os.path.dirname(sys.argv[0])
+    DIR = fileutil.to_posix(os.path.dirname(sys.argv[0]))
 
-CACHE = std_path(os.path.join(DIR, ".cache"))
-TMP = std_path(os.path.join(DIR, ".tmp"))
+CACHE = posixpath.join(DIR, ".cache")
+TMP = posixpath.join(DIR, ".tmp")
 
-DEFAULT_WWISE_PROJECT = os.path.join(
+DEFAULT_WWISE_PROJECT = posixpath.join(
     DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj")
 
 SYSTEM = platform.system()
@@ -30,9 +31,9 @@ match SYSTEM:
         FFMPEG = "ffmpeg.exe"
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
         if "WWISEROOT" in os.environ:
-            WWISE_CLI = os.path.join(
-                    os.environ["WWISEROOT"],
-                    "Authoring\\x64\\Release\\bin\\WwiseConsole.exe"
+            WWISE_CLI = posixpath.join(
+                    fileutil.to_posix(os.environ["WWISEROOT"]),
+                    "Authoring/x64/Release/bin/WwiseConsole.exe"
             )
         else:
             logger.warning("Failed to locate WwiseConsole.exe")
@@ -61,8 +62,12 @@ else:
     WWISE_VERSION = ""
 
 def get_data_path():
+    """
+    @return
+    - Return absolute path POSIX
+    """
     location = os.environ.get("HD2DATA")
     return "" if location == None else location
 
 def set_data_path(path: str):
-    os.environ["HD2DATA"] = path 
+    os.environ["HD2DATA"] = fileutil.to_posix(path)
