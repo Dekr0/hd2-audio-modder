@@ -4,7 +4,7 @@ import unittest
 import config as cfg
 
 from audio_modder import FileHandler
-from fileutil import std_path
+from fileutil import to_posix
 from log import logger
 
 
@@ -29,10 +29,10 @@ class TestPatchAutomation(unittest.TestCase):
                 },
                 FileHandler.PatchAuotmationTask(
                     set([
-                        std_path(os.path.abspath("test_mockup/archive_files/a66d7cf238070ca7"))
+                        to_posix(os.path.abspath("test_mockup/archive_files/a66d7cf238070ca7"))
                     ]),
                     set([
-                        std_path(os.path.abspath("test_mockup/target_import_manifest/adjudicator.json"))
+                        to_posix(os.path.abspath("test_mockup/target_import_manifest/adjudicator.json"))
                     ])
                 )
             )
@@ -67,10 +67,10 @@ class TestPatchAutomation(unittest.TestCase):
                 },
                 FileHandler.PatchAuotmationTask(
                     set([
-                        std_path(os.path.join(os.environ["HD2DATA"], "a66d7cf238070ca7"))
+                        to_posix(os.path.join(os.environ["HD2DATA"], "a66d7cf238070ca7"))
                     ]),
                     set([
-                        std_path(os.path.abspath("test_mockup/target_import_manifest/adjudicator.json"))
+                        to_posix(os.path.abspath("test_mockup/target_import_manifest/adjudicator.json"))
                     ])
                 )
             )
