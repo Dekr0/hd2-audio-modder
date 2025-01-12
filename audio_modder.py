@@ -16,6 +16,7 @@ import pathlib
 import uuid
 import xml.etree.ElementTree as etree
 
+from collections import deque
 from concurrent import futures
 from dataclasses import dataclass
 from functools import partial
@@ -4666,13 +4667,16 @@ class MainWindow:
     Seelction Overhauling
     """
     def treeview_selection_collaspe(self):
-        selects = set(self.treeview.selection())
-        collaspe_selects: set[str] = set()
+        selects = self.treeview.selection()
+        fold_select_set: set[str] = set(selects)
+        unfold_select_set: set[str] = set()
+        unfold_select_list: list[str] = [] 
         for select in selects:
             parent_entry_vid = self.treeview.parent(select)
-            if parent_entry_vid not in selects:
-                collaspe_selects.add(select)
-        return tuple(collaspe_selects)
+            if parent_entry_vid not in fold_select_set:
+                unfold_select_set.add(select)
+                unfold_select_list.append(select)
+        return tuple(unfold_select_list)
     """
     End
     """
@@ -4680,7 +4684,7 @@ class MainWindow:
     """
     Copy ID Overhaul
     """
-    def copy_id_linear(self):
+    def copy_id_linear(self, detailed: bool):
         self.root.clipboard_clear()
 
         content: list[str] = []
@@ -4694,7 +4698,10 @@ class MainWindow:
                     text = f"{text}: {tid}"
                 case _:
                     tid = self.get_entry_tag_id(select)
-                    text = f"\"placeholder\": {tid} ({etype})"
+                    if detailed:
+                        text = f"\"placeholder\": {tid} ({etype})"
+                    else:
+                        text = f"{tid}"
             content.append(text)
 
         self.root.clipboard_append("\n".join(content))
@@ -4796,7 +4803,11 @@ class MainWindow:
         )
         self.rc_copy_target_import_menu.add_command(
             label="As JSON",
-            command=self.generate_target_import_manifest
+            command=lambda: self.generate_target_import_manifest(True)
+        )
+        self.rc_copy_target_import_menu.add_command(
+            label="As JSON (Pairs Only)",
+            command=lambda: self.generate_target_import_manifest(False)
         )
 
     def init_rc_copy_menu(self):
@@ -4806,7 +4817,11 @@ class MainWindow:
         )
         self.rc_copy_plain_menu.add_command(
             label="Linear",
-            command=self.copy_id_linear,
+            command=lambda: self.copy_id_linear(True),
+        )
+        self.rc_copy_plain_menu.add_command(
+            label="Linear (Without Label and Type)",
+            command=lambda: self.copy_id_linear(False),
         )
         self.rc_copy_plain_menu.add_command(
             label="Tree Structure With Descendant",
@@ -4905,29 +4920,30 @@ class MainWindow:
         """
         self.root.clipboard_clear()
 
-        stack: list[str] = []
+        queue: deque[str] = deque()
         csvs = ""
         for select in self.treeview_selection_collaspe():
-            if len(stack) > 0:
+            if len(queue) > 0:
                 raise AssertionError()
 
-            stack = [select]
-            while len(stack) > 0:
-                vid = stack.pop()
+            queue.append(select)
+            while len(queue) > 0:
+                vid = queue.popleft()
 
                 for child in self.treeview.get_children(vid):
-                    stack.append(child)
+                    queue.append(child)
 
                 etype = self.get_entry_type(vid)
                 match etype:
                     case "Audio Source":
                         tid = self.get_entry_tag_id(vid)
                         csvs += f",1,{tid}\n"
+            csvs += "\n"
 
         self.root.clipboard_append(csvs)
         self.root.update()
 
-    def generate_target_import_manifest(self):
+    def generate_target_import_manifest(self, full: bool):
         """
         @exception
         - AssertionError
@@ -4935,18 +4951,18 @@ class MainWindow:
         """
         self.root.clipboard_clear()
 
-        stack: list[str] = []
+        queue: deque[str] = deque() 
         pairs: list[str] = []
         for select in self.treeview_selection_collaspe():
-            if len(stack) > 0:
+            if len(queue) > 0:
                 raise AssertionError()
 
-            stack = [select]
-            while len(stack) > 0:
-                vid = stack.pop()
+            queue.append(select)
+            while len(queue) > 0:
+                vid = queue.popleft()
 
                 for child in self.treeview.get_children(vid):
-                    stack.append(child)
+                    queue.append(child)
 
                 etype = self.get_entry_type(vid)
                 match etype:
@@ -4954,7 +4970,10 @@ class MainWindow:
                         tid = self.get_entry_tag_id(vid)
                         pairs.append(target_import_schema.pair_template.format(tid))
 
-        self.root.clipboard_append(target_import_schema.template % (",\n".join(pairs)))
+        if full:
+            self.root.clipboard_append(target_import_schema.template % (",\n".join(pairs)))
+        else:
+            self.root.clipboard_append(",\n".join(pairs))
         self.root.update()
 
     """
