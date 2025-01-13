@@ -1,4 +1,5 @@
 import os
+import pathlib
 
 class INode:
 
@@ -39,3 +40,6 @@ def traverse(node):
         for node in top.nodes:
             if node.isdir:
                 stack.append(node)
+
+def to_posix(path: str):
+    return pathlib.PurePath(path).as_posix()
