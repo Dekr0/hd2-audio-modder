@@ -5,7 +5,7 @@ import posixpath
 import sys
 
 import fileutil
-import one_shot_ui
+import ui.one_shot_ui as one_shot_ui
 
 from log import logger
 
@@ -24,6 +24,7 @@ SYSTEM = platform.system()
 
 FFMPEG = ""
 VGMSTREAM = ""
+SYS_CLIPBOARD = ""
 WWISE_CLI = ""
 WWISE_VERSION = ""
 
@@ -40,12 +41,14 @@ match SYSTEM:
             logger.warning("Failed to locate WwiseConsole.exe")
             one_shot_ui.show_warning("Missing Essential Tool",
                                      "Failed to locate WwiseConsole.exe")
+        SYS_CLIPBOARD = "clip"
     case "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
         FFMPEG = "ffmpeg"
         WWISE_CLI = ""
         logger.warning("Wwise integration is not supported for Linux. WAV file "
                        "import is disabled.")
+        SYS_CLIPBOARD = "xclip"
     case "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
@@ -53,6 +56,7 @@ match SYSTEM:
             match = next(pathlib.Path("/Applications/Audiokinetic").glob("Wwise*"))
             WWISE_CLI = os.path.join(match, 
                                      "Wwise.app/Contents/Tools/WwiseConsole.sh")
+        SYS_CLIPBOARD = "pbcopy"
 
 
 if os.path.exists(WWISE_CLI):
@@ -74,4 +78,5 @@ def get_data_path():
 
 
 def set_data_path(path: str):
-    os.environ["HD2DATA"] = fileutil.to_posix(path)
+    if path != "" or os.path.exists(path):
+        os.environ["HD2DATA"] = fileutil.to_posix(path)
