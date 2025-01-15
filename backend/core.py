@@ -1462,23 +1462,35 @@ class SoundHandler:
             self.audio_process = None
         
     def play_audio(self, sound_id, sound_data, callback=None):
+        """
+        @exception
+        - CalledProcessError
+        - NotImplementedError
+        - OSError
+        """
         if not os.path.exists(VGMSTREAM):
-            return
+            raise NotImplementedError("Missing vgmstream for converting WEM file"
+                                      " to WAV file.")
+
         self.kill_sound()
         self.callback = callback
+
         if self.audio_id == sound_id:
             self.audio_id = -1
             return
+
         filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
+
             with open(f'{os.path.join(TMP, filename)}.wem', 'wb') as f:
                 f.write(sound_data)
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, filename)}.wav", f"{os.path.join(TMP, filename)}.wem"], stdout=subprocess.DEVNULL)
+
+            subprocess.run(
+                [VGMSTREAM, 
+                 "-o", f"{os.path.join(TMP, filename)}.wav", f"{os.path.join(TMP, filename)}.wem"], 
+                stdout=subprocess.DEVNULL).check_returncode()
+
             os.remove(f"{os.path.join(TMP, filename)}.wem")
-            if process.returncode != 0:
-                logger.error(f"Encountered error when converting {sound_id}.wem for playback")
-                self.callback = None
-                return
             
         self.audio_id = sound_id
         self.wave_file = wave.open(f"{os.path.join(TMP, filename)}.wav")
