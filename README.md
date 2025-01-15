@@ -1,7 +1,9 @@
 # Introduction
 
 - This branch contains the upcoming new UI for the audio and text modding tool 
-for Helldivers 2. For the original README.md, please refer to [here]().
+for Helldivers 2. For the original README.md, please refer to [here](https://github.com/RaidingForPants/hd2-audio-modder).
+
+https://github.com/user-attachments/assets/ab0a2163-5668-457f-aad6-7bf672c7632b
 
 ## Prerequisite
 
@@ -23,8 +25,7 @@ for Helldivers 2. For the original README.md, please refer to [here]().
 
 ## Expectation
 
-- This version of the tool misses some features from the latest one. This is 
-expected.
+- This version of the tool misses some features from the latest one. This is expected.
 - Treat this version of the tool as a more efficient way of exploring different 
 game archives and sound banks and exporting metadata.
 - The missing features will be ported to this version of the tool. However, 
