@@ -17,15 +17,17 @@ DOCKING_WINDOW_FLAGS |= imgui.WindowFlags_.no_bring_to_front_on_focus.value | \
 
 MULTI_SELECT_FLAGS = imgui.MultiSelectFlags_.clear_on_escape.value
 
-TABLE_FLAGS = imgui.TableFlags_.resizable.value   | \
-              imgui.TableFlags_.reorderable.value | \
-              imgui.TableFlags_.borders_h.value   | \
-              imgui.TableFlags_.borders_v.value   | \
+TABLE_FLAGS = imgui.TableFlags_.resizable.value        | \
+              imgui.TableFlags_.reorderable.value      | \
+              imgui.TableFlags_.row_bg.value           | \
+              imgui.TableFlags_.borders_h.value        | \
+              imgui.TableFlags_.borders_v.value        | \
               imgui.TableFlags_.sizing_fixed_fit.value | \
-              imgui.TableFlags_.no_host_extend_x.value
+              imgui.TableFlags_.no_host_extend_x.value | \
+              imgui.TableFlags_.scroll_y.value
 
-TABLE_COLUMN_FLAGS = imgui.TableColumnFlags_.indent_disable.value
-TABLE_COLUMN_FLAGS_FIXED = TABLE_COLUMN_FLAGS | \
+TABLE_COLUMN_FLAGS_INDENT = imgui.TableColumnFlags_.indent_enable.value
+TABLE_COLUMN_FLAGS_FIXED = imgui.TableColumnFlags_.indent_disable.value | \
                            imgui.TableColumnFlags_.width_fixed.value
 
 TREE_NODE_FLAGS  = imgui.TreeNodeFlags_.span_avail_width.value | \
