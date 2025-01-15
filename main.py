@@ -63,7 +63,7 @@ def render(window, impl, app_state: AppState):
         for archive in result:
             new_bank_explorer_state = new_bank_explorer_states(app_state.sound_handler)
             try:
-                new_bank_explorer_state.file_handler.load_archive_file(archive_file=archive)
+                new_bank_explorer_state.file_handler.load_archive_file(archive)
                 bank_states.append(new_bank_explorer_state)
                 if new_bank_explorer_state.source_view:
                     create_bank_source_view(new_bank_explorer_state)
@@ -323,4 +323,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    """
+    !!! Remove this once the UI is stable enough.
+    """
+    try:
+        main()
+    except Exception as err:
+        logger.error(err)
