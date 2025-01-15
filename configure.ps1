@@ -1,13 +1,31 @@
-python -m venv .venv
+function Setup() {
+    python -m venv .venv
+    
+    . .venv/Scripts/Activate.ps1
+    
+    wget -Uri "https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-win64.zip" -OutFile vgmstream-win64.zip
+    
+    Expand-Archive -Path "vgmstream-win64.zip" -DestinationPath "vgmstream-win64"
+    
+    rm vgmstream-win64.zip
+    
+    pip install -r requirements.txt
+    
+    deactivate
+}
 
-. .\.venv\Scripts\Activate.ps1
+function Build() {
+    . .venv/Scripts/Activate.ps1
 
-wget -Uri "https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-win64.zip" -OutFile .\vgmstream-win64.zip
+    python setup.py dist
 
-Expand-Archive -Path ".\vgmstream-win64.zip" -DestinationPath ".\vgmstream-win64"
+    cp fonts dist
 
-rm .\vgmstream-win64.zip
+    wget -Uri "https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-win64.zip" -OutFile vgmstream-win64.zip
 
-pip install -r requirements.txt
+    Expand-Archive -Path "vgmstream-win64.zip" -DestinationPath "./dist/vgmstream-win64"
 
-deactivate
+    rm vgmstream-win64.zip
+
+    deactivate
+}
