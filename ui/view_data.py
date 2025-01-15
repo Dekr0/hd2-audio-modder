@@ -1,4 +1,7 @@
+from collections import deque
 import enum
+from typing import Callable
+import uuid
 
 # Definition import
 from dataclasses import dataclass
@@ -11,6 +14,7 @@ from audio_modder import MusicSegment, RandomSequenceContainer, Sound
 from backend.sound_handler import SoundHandler
 
 from backend.const import VORBIS
+from setting import Setting
 
 
 TREE_ROOT_VIEW_ID = 0
@@ -70,30 +74,77 @@ class BankExplorerTableType(enum.StrEnum):
 class FilePicker:
 
     def __init__(self):
-        self.archive_picker: pfd.open_file | None = None
-        self.export_wem_picker: pfd.save_file | None = None
-        self.export_wav_picker: pfd.save_file | None = None
+        self.file_picker: pfd.open_file | None = None
 
-    def schedule_load_archive_file(self, default_path: str = ""):
+    def schedule(self,
+                 msg: str = "Select A File", 
+                 default_path: str = "",
+                 multi: bool = False):
         """
         @exception
         - AssertionError
-            - Rescheudle a new archive picker before the active one is closed
+            - Rescheudle before the active one is closed
         """
-        if self.archive_picker != None:
-            raise AssertionError("Rescheudle a new archive picker before the "
+        if self.file_picker != None:
+            raise AssertionError("Rescheudle a new file picker before the "
                                  "active one is closed")
-        self.archive_picker = pfd.open_file("Select An Archive", default_path)
+        if multi:
+            self.file_picker = pfd.open_file(
+                msg, 
+                default_path, 
+                options=pfd.opt.multiselect)
+        else:
+            self.file_picker = pfd.open_file(
+                msg, 
+                default_path)
 
-    def is_load_archive_file_ready(self):
-        return self.archive_picker != None and self.archive_picker.ready()
+
+    def is_ready(self):
+        return self.file_picker != None and self.file_picker.ready()
+
+    def get_result(self) -> list[str]:
+        if self.file_picker != None and self.file_picker.ready():
+            return self.file_picker.result()
+        return []
+
+    def reset(self):
+        self.file_picker = None
+
+
+class FolderPicker:
+
+    def __init__(self):
+        self.folder_picker: pfd.select_folder | None = None
+
+    def schedule(self, msg: str = "Select A Folder", default_path: str = ""):
+        """
+        @exception
+        - AssertionError
+            - Rescheudle before the active one is closed
+        """
+        if self.folder_picker != None:
+            raise AssertionError("Rescheudle a new folder picker before the "
+                                 "active one is closed")
+        self.folder_picker = pfd.select_folder(msg, default_path)
+
+    def is_ready(self):
+        return self.folder_picker != None and self.folder_picker.ready()
+
+    def get_result(self) -> str:
+        if self.folder_picker != None and self.folder_picker.ready():
+            return self.folder_picker.result()
+        return ""
+
+    def reset(self):
+        self.folder_picker = None
 
 
 @dataclass
 class BankViewerState:
-
+    
+    id: str
     file_handler: FileHandler 
-    file_picker: FilePicker
+    archive_picker: FilePicker
     sound_handler: SoundHandler
 
     """
@@ -122,37 +173,52 @@ class BankViewerState:
         - quick access on node in terms of query node when handling selection 
         for tree structure
     """
-    soundbank_source_view_root: 'SoundbankHierarchyBinding'
-    soundbank_source_views_linear: list['SoundbankHierarchyBinding']
-    soundbank_hirc_view_root: 'SoundbankHierarchyBinding'
-    soundbank_hirc_views_linear: list['SoundbankHierarchyBinding']
+    source_view_root: 'HierarchyView'
+    source_views_linear: list['HierarchyView']
+    hirc_view_root: 'HierarchyView'
+    hirc_views_linear: list['HierarchyView']
 
-    soundbank_imgui_selection: imgui.SelectionBasicStorage
+    imgui_selection_store: imgui.SelectionBasicStorage
 
     source_view: bool = True
-    
+
+
+@dataclass
+class MessageModalState:
+
+    msg: str
+    is_trigger: bool = False
+
 
 @dataclass
 class AppState:
 
-    file_picker: FilePicker
+    archive_picker: FilePicker
+    data_folder_picker: FolderPicker
+
     sound_handler: SoundHandler
+
+    setting: Setting | None
+
     font: imgui.ImFont
     symbol_font: imgui.ImFont
 
     bank_states: list[BankViewerState]
+
+    critical_modal: MessageModalState | None
+    warning_modals: deque[MessageModalState]
 # [End]
 
 
 @dataclass
-class SoundbankHierarchyBinding:
+class HierarchyView:
     """
     view_id: int -> Row index (increment sequentially as imgui render the table )
     parent_view_id: int -> Parent row index
     """
 
     # Binding For Quick Access
-    hierarchy_entry: HircEntry | AudioSource | None
+    data: HircEntry | AudioSource | None
 
     view_id: int
     parent_view_id: int | None
@@ -160,11 +226,11 @@ class SoundbankHierarchyBinding:
     default_label: str
     hirc_entry_type: BankExplorerTableType
     user_defined_label: str
-    children: list['SoundbankHierarchyBinding']
+    children: list['HierarchyView']
 
 
 def new_hirc_view_root():
-    return SoundbankHierarchyBinding(
+    return HierarchyView(
             None,
             TREE_ROOT_VIEW_ID, None, 
             -1, "", 
@@ -173,6 +239,7 @@ def new_hirc_view_root():
 
 def new_bank_explorer_states(sound_handler: SoundHandler):
     return BankViewerState(
+            uuid.uuid4().hex,
             FileHandler(),
             FilePicker(), 
             sound_handler,
@@ -181,23 +248,22 @@ def new_bank_explorer_states(sound_handler: SoundHandler):
             imgui.SelectionBasicStorage())
 
 
-def new_app_state(
-        sound_handler: SoundHandler, 
-        file_picker: FilePicker, 
-        font, 
-        symbol_font):
+def new_app_state(font, symbol_font):
+    sound_handler = SoundHandler()
     return AppState(
-            file_picker, 
+            FilePicker(),
+            FolderPicker(),
             sound_handler,
-            font,
-            symbol_font,
-            [new_bank_explorer_states(sound_handler)])
+            None,
+            font, symbol_font,
+            [new_bank_explorer_states(sound_handler)],
+            None, deque())
 
 
 def create_bank_hierarchy_view(bank_state: BankViewerState):
-    root = bank_state.soundbank_hirc_view_root
+    root = bank_state.hirc_view_root
     bank_hirc_views = root.children
-    bank_hirc_views_linear = bank_state.soundbank_hirc_views_linear
+    bank_hirc_views_linear = bank_state.hirc_views_linear
 
     bank_hirc_views.clear()
     bank_hirc_views_linear.clear()
@@ -219,7 +285,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
             # Logging
             continue
 
-        bank_view = SoundbankHierarchyBinding(
+        bank_view = HierarchyView(
                 None,
                 idx, root.view_id,
                 bank.get_id(), bank.get_name().replace("content/audio/", ""),
@@ -235,7 +301,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
         for hirc_entry in hirc_entries.values():
             if isinstance(hirc_entry, MusicSegment):
                 segment_id = hirc_entry.get_id()
-                segment_view = SoundbankHierarchyBinding(
+                segment_view = HierarchyView(
                         hirc_entry,
                         idx, bank_idx,
                         segment_id, f"Segment {segment_id}",
@@ -249,7 +315,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
 
                 for track_id in hirc_entry.tracks:
                     track = hirc_entries[track_id]
-                    track_view = SoundbankHierarchyBinding(
+                    track_view = HierarchyView(
                             track,
                             idx, segment_view_id, 
                             track_id, f"Track {track_id}", 
@@ -270,7 +336,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                             # Logging?
                             continue
 
-                        source_view = SoundbankHierarchyBinding(
+                        source_view = HierarchyView(
                                 audio_source,
                                 idx, track_view_id,
                                 source_id, f"{source_id}.wem",
@@ -286,7 +352,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                             continue
 
                         info_id = info.get_id()
-                        info_view = SoundbankHierarchyBinding(
+                        info_view = HierarchyView(
                                 info,
                                 idx, track_view_id,
                                 info_id, f"Event {info_id}", 
@@ -298,7 +364,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
 
             elif isinstance(hirc_entry, RandomSequenceContainer):
                 cntr_id = hirc_entry.get_id()
-                cntr_view = SoundbankHierarchyBinding(
+                cntr_view = HierarchyView(
                         hirc_entry,
                         idx, bank_idx,
                         cntr_id, f"Random / Sequence Container {cntr_id}",
@@ -326,7 +392,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
 
                     contained_sounds.add(entry)
 
-                    source_view = SoundbankHierarchyBinding(
+                    source_view = HierarchyView(
                             audio_source,
                             idx, cntr_view_id,
                             source_id, f"{source_id}.wem",
@@ -346,7 +412,7 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                 # Logging?
                 continue
 
-            source_view = SoundbankHierarchyBinding(
+            source_view = HierarchyView(
                     audio_source,
                     idx, bank_idx,
                     source_id, f"{source_id}.wem",
@@ -358,9 +424,9 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
 
 
 def create_bank_source_view(bank_viewer_state: BankViewerState):
-    root = bank_viewer_state.soundbank_source_view_root
+    root = bank_viewer_state.source_view_root
     bank_source_views = root.children
-    bank_source_views_linear = bank_viewer_state.soundbank_source_views_linear
+    bank_source_views_linear = bank_viewer_state.source_views_linear
 
     bank_source_views.clear()
     bank_source_views_linear.clear()
@@ -383,7 +449,7 @@ def create_bank_source_view(bank_viewer_state: BankViewerState):
             continue
         memo.clear()
 
-        bank_view = SoundbankHierarchyBinding(
+        bank_view = HierarchyView(
                 None,
                 idx, root.view_id,
                 bank.get_id(), bank.get_name().replace("content/audio/", ""),
@@ -411,7 +477,7 @@ def create_bank_source_view(bank_viewer_state: BankViewerState):
                     # Logging
                     continue
 
-                source_view = SoundbankHierarchyBinding(
+                source_view = HierarchyView(
                     audio_source,
                     idx, bank_idx, 
                     source_id, f"{source_id}.wem",
