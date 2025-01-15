@@ -1,6 +1,5 @@
 from collections import deque
 import enum
-from typing import Callable
 import uuid
 
 # Definition import
