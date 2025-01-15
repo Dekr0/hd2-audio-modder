@@ -9,9 +9,9 @@ from dataclasses import dataclass
 # Module import
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
-from audio_modder import AudioSource, FileHandler, HircEntry
-from audio_modder import MusicSegment, RandomSequenceContainer, Sound
-from backend.sound_handler import SoundHandler
+from backend.core import AudioSource, FileHandler, HircEntry
+from backend.core import MusicSegment, RandomSequenceContainer, Sound
+from backend.core import SoundHandler
 
 from backend.const import VORBIS
 from setting import Setting
