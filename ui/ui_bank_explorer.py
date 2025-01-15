@@ -36,7 +36,7 @@ def gui_bank_explorer(app_state: AppState, bank_state: BankViewerState):
 
         if len(result) == 1:
             try:
-                file_handler.load_archive_file(archive_file=result[0])
+                file_handler.load_archive_file(result[0])
                 if bank_state.source_view:
                     create_bank_source_view(bank_state)
                 else:
@@ -244,7 +244,19 @@ def gui_bank_explorer_table_row(
                 raise AssertionError("Entry is marked as type audio source but "
                                      "binding data is not an instance of Audio "
                                      f"Source ({type(audio)}).")
-            bank_viewer_state.sound_handler.play_audio(audio.get_short_id(), audio.get_data())
+            try:
+                bank_viewer_state \
+                        .sound_handler \
+                        .play_audio(audio.get_short_id(), audio.get_data())
+            except (subprocess.CalledProcessError) as err:
+                logger.error(f"Failed to play audio. Reason: {err}")
+                # Or show modal
+            except NotImplementedError as err:
+                logger.error(err)
+                # Or show modal
+            except OSError as err:
+                logger.error(err)
+                # Or show modal
     else:
         imgui.text_disabled("--")
     # [End]
