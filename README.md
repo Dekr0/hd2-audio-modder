@@ -1,70 +1,32 @@
-# Audio and Text Modder For Helldivers 2
+# Introduction
 
-I made this program to help make modding audio data easier.
+- This branch contains the upcoming new UI for the audio and text modding tool 
+for Helldivers 2. For the original README.md, please refer to [here]().
 
-[Mini tutorial for audio modding](https://docs.google.com/document/d/e/2PACX-1vT5mFXlk0iPGF-yoR3hMPrws3iPa4cY5O6PjzLcgz3Jj9vHUh5mYN1P1uWb6QiPA8K5rcvac929icV2/pub)
+## Prerequisite
 
-Thanks to everyone behind the [Helldivers 2 Blender Addon](https://github.com/Boxofbiscuits97/HD2SDK-CommunityEdition) for letting me use some of their code.
+- Make sure you install the following for the operating system you're using:
+    - Python (https://www.python.org/downloads/)
 
-You can use the prebuilt executables (built with PyInstaller) in the releases tab, or you can run the Python.
+## How To Run
 
-If you run the Python code, you will need the appropriate distribution of [vgmstream](https://vgmstream.org/) to play audio from within the program. Place the vgmstream folder into the same folder as the Python code.
+- [Download](https://github.com/Dekr0/hd2-audio-modder/archive/refs/heads/new_ui.zip) the zipped source code of this branch
+- Unzip the zipped source code
+- If you're on Windows,
+    - (Only once) right click on `configure.ps1`, and click on "Run With 
+    PowerShell". This will install the necessary dependencies to run the new 
+    UI.
+    - (Every time) to launch the tool , right click on `run.ps1`, and click on 
+    "Run With PowerShell".
+- If you're on Linux or MacOS,
+    - Under construction.
 
-## Running the Python code
+## Expectation
 
-Requires Python 3.10 or later.
-
-### Windows
-Install [Python 3](https://www.python.org/downloads/windows/). Make sure to check in the Python installer the optional feature "tcl/tk and IDLE".
-
-Install the dependencies:
-
-```python -m pip install -r requirements.txt```
-
-Run the program:
-
-```python audio_modder.py```
-
-### Linux
-PortAudio and tkinter must be installed.
-
-**Ubuntu:**
-
-```apt-get install python3-tk```
-
-```apt-get install portaudio19-dev python-all-dev```
-
-
-Install the dependencies:
-
-```python3 -m pip install -r requirements.txt```
-
-Run the program:
-
-```python3 audio_modder.py```
-
-
-### MacOS
-PortAudio and Python must be installed.
-
-**Python**
-
-Install [Python](https://www.python.org/downloads/macos/).
-
-**PortAudio**
-
-Install [Homebrew package manager](https://brew.sh/).
-
-Install portaudio:
-
-```brew install portaudio```
-
-
-
-Install the dependencies:
-
-```python3 -m pip install -r requirements.txt```
-
-Run the program:
-
-```python3 audio_modder.py```
+- This version of the tool misses some features from the latest one. This is 
+expected.
+- Treat this version of the tool as a more efficient way of exploring different 
+game archives and sound banks and exporting metadata.
+- The missing features will be ported to this version of the tool. However, 
+features that are focus on exploration and metadata export will have a higher 
+priority.
