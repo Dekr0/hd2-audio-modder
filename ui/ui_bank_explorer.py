@@ -4,7 +4,7 @@ import os
 import subprocess
 from imgui_bundle import imgui
 
-from audio_modder import AudioSource
+from backend.core import AudioSource
 from backend.env import SYS_CLIPBOARD, get_data_path
 from ui.ui_flags import *
 from ui.ui_keys import *
