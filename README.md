@@ -12,7 +12,8 @@ https://github.com/user-attachments/assets/ab0a2163-5668-457f-aad6-7bf672c7632b
 
 ## How To Run
 
-- [Download](https://github.com/Dekr0/hd2-audio-modder/archive/refs/heads/new_ui.zip) the zipped source code of this branch
+- [Download](https://github.com/Dekr0/hd2-audio-modder/archive/refs/heads/new_ui.zip) 
+the zipped source code of this branch.
 - Unzip the zipped source code
 - If you're on Windows,
     - (Only once) right click on `configure.ps1`, and click on "Run With 
@@ -31,3 +32,8 @@ game archives and sound banks and exporting metadata.
 - The missing features will be ported to this version of the tool. However, 
 features that are focus on exploration and metadata export will have a higher 
 priority.
+
+## Report Bugs
+
+- This version of the tool is actively under development. Please report bugs as 
+there's one.
