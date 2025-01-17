@@ -1,18 +1,16 @@
 import gc
 import os
-import glfw
+import pickle
 import shutil
-import OpenGL.GL
+
+import setting
 
 # Module import
-from imgui_bundle import imgui
+from imgui_bundle import hello_imgui, imgui
 
-# Definition import
-from imgui_bundle.python_backends.glfw_backend import GlfwRenderer
-
+from backend.db.db_access import config_sqlite_conn
 from backend.env import *
 from log import logger
-from setting import *
 from ui.ui_flags import *
 from ui.ui_bank_explorer import *
 from ui.view_data import *
@@ -20,27 +18,71 @@ from ui.view_data import *
 NTHREAD = 8
 
 
-def render(window, impl, app_state: AppState):
-    if window == None:
-        raise RuntimeError("Assertion error. GLFW window is None.")
-    if impl == None:
-        raise RuntimeError("Assertion error. GlfwRenderer is None.")
+def main():
+    hello_imgui.set_assets_folder(".")
 
-    glfw.poll_events()
-    impl.process_inputs()
+    app_state = new_app_state() 
+
+    runner_params = hello_imgui.RunnerParams()
+    runner_params.app_window_params.window_title = "Shovel"
+    runner_params.app_window_params.window_geometry.size = (1280, 720)
+    runner_params.app_window_params.restore_previous_geometry = True
+    runner_params.app_window_params.borderless = True
+    runner_params.app_window_params.borderless_movable = True
+    runner_params.app_window_params.borderless_resizable = True
+    runner_params.app_window_params.borderless_closable = True
+
+    runner_params.callbacks.load_additional_fonts = \
+            lambda: load_fonts(app_state)
     
-    imgui.new_frame()
+    runner_params.imgui_window_params.show_menu_bar = True
+    runner_params.imgui_window_params.show_menu_app = False
+    runner_params.imgui_window_params.show_menu_view = False
+    runner_params.callbacks.show_menus = \
+            lambda: show_menus(runner_params, app_state)
 
-    gui_docking_window(app_state)
+    runner_params.callbacks.post_init = lambda: post_init(app_state)
+    runner_params.callbacks.before_exit = lambda: before_exit(app_state)
 
+    runner_params.imgui_window_params.default_imgui_window_type = (
+        hello_imgui.DefaultImGuiWindowType.provide_full_screen_dock_space
+    )
+
+    runner_params.callbacks.show_gui = lambda: gui(app_state)
+
+    hello_imgui.run(
+        runner_params
+    )
+
+
+def load_fonts(app_state: AppState):
+
+    app_state.font = hello_imgui.load_font("fonts/blex_mono_nerd_font.ttf", 18)
+
+    symbol_font_params = hello_imgui.FontLoadingParams()
+    symbol_font_params.merge_to_last_font = True
+    symbol_font_params.glyph_ranges = [ (0xe003, 0xf8ff) ]
+    app_state.symbol_font = hello_imgui.load_font("fonts/symbol_font.ttf", 18, symbol_font_params)
+
+
+def show_menus(
+        runner_params: hello_imgui.RunnerParams, app_state: AppState):
+    hello_imgui.show_view_menu(runner_params)
+
+    gui_file_menu(app_state)
+    gui_setting_menu(app_state)
+
+
+def gui(app_state: AppState):
     archive_picker = app_state.archive_picker
     data_folder_picker = app_state.data_folder_picker
 
     bank_states = app_state.bank_states
 
     if run_critical_modal(app_state):
-        return False
+        exit(1)
     run_warning_modal(app_state)
+    run_confirm_modal(app_state)
 
     closed_banks: list[BankViewerState] = []
     for bank_state in bank_states:
@@ -50,13 +92,27 @@ def render(window, impl, app_state: AppState):
 
     num_closed_bank = len(closed_banks)
     for bank_state in closed_banks:
-        bank_states.remove(bank_state)
+        if len(bank_state.changed_hierarchy_views.items()) <= 0:
+            bank_states.remove(bank_state)
+            continue
+
+        def callback(save: bool):
+            if save:
+                save_hierarchy_object_views_change_with_modal(app_state,
+                                                              bank_state)
+            bank_states.remove(bank_state)
+
+        app_state.confirm_modals.append(ConfirmModalState(
+            "There are unsave changes. Do you want to save before closing "
+            "this bank explorer?",
+            callback = callback
+        ))
+
+        break
+
     closed_banks.clear()
     if num_closed_bank > 0:
         gc.collect()
-
-    # imgui.show_metrics_window()
-    # imgui.show_debug_log_window()
 
     if archive_picker.is_ready():
         result = archive_picker.get_result()
@@ -65,16 +121,17 @@ def render(window, impl, app_state: AppState):
             try:
                 new_bank_explorer_state.file_handler.load_archive_file(archive)
                 bank_states.append(new_bank_explorer_state)
-                if new_bank_explorer_state.source_view:
-                    create_bank_source_view(new_bank_explorer_state)
-                else:
-                    create_bank_hierarchy_view(new_bank_explorer_state)
+                fetch_bank_hierarchy_object_view(app_state, new_bank_explorer_state)
+                create_bank_hierarchy_view(new_bank_explorer_state)
                 gui_bank_explorer(app_state, new_bank_explorer_state)
             except OSError as e:
-                # Show popup window
+                # show modal or display on the logger
+                logger.error(e)
+            except sqlite3.Error as e:
+                # show modal or display on the logger
                 logger.error(e)
             except Exception as e:
-                # Show popup window
+                # show modal or display on the logger
                 logger.error(e)
 
         archive_picker.reset()
@@ -86,45 +143,6 @@ def render(window, impl, app_state: AppState):
         app_state.setting.data = result
         set_data_path(result)
         data_folder_picker.reset()
-
-    OpenGL.GL.glClearColor(0, 0, 0, 1)
-    OpenGL.GL.glClear(OpenGL.GL.GL_COLOR_BUFFER_BIT)
-
-    imgui.render()
-    impl.render(imgui.get_draw_data())
-    glfw.swap_buffers(window)
-
-    return True
-
-
-def gui_docking_window(app_state: AppState):
-    viewport = imgui.get_main_viewport()
-    imgui.set_next_window_pos(viewport.work_pos)
-    imgui.set_next_window_size(viewport.work_size)
-    imgui.set_next_window_viewport(viewport.id_)
-    imgui.push_style_var(imgui.StyleVar_.window_rounding.value, 0.0)
-    imgui.push_style_var(imgui.StyleVar_.window_border_size.value, 0.0)
-    imgui.push_style_var(imgui.StyleVar_.window_padding.value, imgui.ImVec2(0, 0))
-
-    imgui.begin("Shovel", False, DOCKING_WINDOW_FLAGS)
-    imgui.pop_style_var(3)
-
-    dockspace_id = imgui.get_id("main")
-    imgui.dock_space(dockspace_id, imgui.ImVec2(0, 0), DOCKSPACE_FLAGS)
-
-    gui_menu_bar(app_state)
-
-    imgui.end()
-
-
-def gui_menu_bar(app_state: AppState):
-    if not imgui.begin_menu_bar():
-        return
-
-    gui_file_menu(app_state)
-    gui_setting_menu(app_state)
-
-    imgui.end_menu_bar()
 
 
 def gui_file_menu(app_state: AppState):
@@ -184,112 +202,88 @@ def gui_setting_menu(app_state: AppState):
 
 def run_critical_modal(app_state: AppState) -> bool:
     critical_modal = app_state.critical_modal
-    if critical_modal != None:
-        if not critical_modal.is_trigger:
-            imgui.open_popup("Critical")
-            critical_modal.is_trigger = True
-        ok, _ = imgui.begin_popup_modal("Critical")
-        if ok:
-            imgui.text(critical_modal.msg)
-            if imgui.button("Exit"):
-                imgui.close_current_popup()
-                imgui.end_popup()
-                return True
-            imgui.end_popup()
-    return False
+    if critical_modal == None:
+        return False
 
+    if not critical_modal.is_trigger:
+        imgui.open_popup("Critical")
+        critical_modal.is_trigger = True
+
+    ok, _ = imgui.begin_popup_modal("Critical", flags = imgui.WindowFlags_.always_auto_resize.value)
+    if not ok:
+        return False
+
+    imgui.text(critical_modal.msg)
+    if imgui.button("Exit"):
+        imgui.close_current_popup()
+        imgui.end_popup()
+        return True
+
+    imgui.end_popup()
+
+    return False
+        
 
 def run_warning_modal(app_state: AppState):
     warning_modals = app_state.warning_modals
-    if len(warning_modals) > 0:
-        top = warning_modals[0]
-        if not top.is_trigger:
-            imgui.open_popup("Warning")
-            top.is_trigger = True
-        ok, _ = imgui.begin_popup_modal("Warning")
-        if ok:
-            imgui.text(top.msg)
-            if imgui.button("OK"):
-                imgui.close_current_popup()
-                imgui.end_popup()
-                warning_modals.popleft()
-                return
-            imgui.end_popup()
+    if len(warning_modals) <= 0:
+        return
+
+    top = warning_modals[0]
+    if not top.is_trigger:
+        imgui.open_popup("Warning")
+        top.is_trigger = True
+
+    ok, _ = imgui.begin_popup_modal("Warning", flags = imgui.WindowFlags_.always_auto_resize.value)
+    if not ok:
+        return
+
+    imgui.text(top.msg)
+    if imgui.button("OK"):
+        imgui.close_current_popup()
+        imgui.end_popup()
+        warning_modals.popleft()
+        return
+    imgui.end_popup()
 
 
-def impl_glfw_init():
-    """
-    @return
-    window - Guarantee is not None
-    """
-    width, height = 1280, 720
-    window_name = "Shovel"
+def run_confirm_modal(app_state: AppState):
+    confirm_modals = app_state.confirm_modals
+    if len(confirm_modals) <= 0:
+        return
 
-    if not glfw.init():
-        # Logging
-        exit(1)
+    top = confirm_modals[0]
+    if not top.is_trigger:
+        imgui.open_popup("Required Action")
+        top.is_trigger = True
 
-    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-    glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+    ok, _ = imgui.begin_popup_modal("Required Action", flags = imgui.WindowFlags_.always_auto_resize.value)
+    if not ok:
+        return
 
-    glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, OpenGL.GL.GL_TRUE)
+    imgui.text(top.msg)
+    callback = top.callback
 
-    window = glfw.create_window(width, height, window_name, None, None)
-    glfw.make_context_current(window)
+    if imgui.button("Yes"):
+        if callback != None:
+            callback(True)
+        imgui.close_current_popup()
+        imgui.end_popup()
+        confirm_modals.popleft()
+        return
 
-    if window == None:
-        glfw.terminate()
-        # Logging
-        exit(1)
+    if imgui.button("No"):
+        if callback != None:
+            callback(False)
+        imgui.close_current_popup()
+        imgui.end_popup()
+        confirm_modals.popleft()
+        return
 
-    return window
-
-
-def init():
-    """
-    @return 
-    window - Guarantee is not None
-    impl - Guarantee is not None
-    """
-    imgui.create_context()
-    imgui.get_io().config_flags |= imgui.ConfigFlags_.docking_enable.value
-
-    font = imgui.get_io().fonts.add_font_from_file_ttf(
-            "fonts/blex_mono_nerd_font.ttf", 18)
-    cfg = imgui.ImFontConfig()
-    cfg.merge_mode = True
-    symbol_font = imgui.get_io().fonts.add_font_from_file_ttf(
-            "fonts/symbol_font.ttf", 18, cfg, [ 0xe003, 0xf8ff, 0 ])
-
-    window = impl_glfw_init()
-    if window == None:
-        raise RuntimeError("Assertion error. GLFW window is None.")
-
-    impl = GlfwRenderer(window)
-    if impl == None:
-        raise RuntimeError("Assertion error. GlfwRenderer is None.")
-
-    return window, impl, font, symbol_font
+    imgui.end_popup()
 
 
-def setup_app_data():
-    """
-    @exception
-    - OSError
-    """
-    if os.path.exists(TMP):
-        # Try-Except Block
-        shutil.rmtree(TMP)
-    os.mkdir(TMP)
-
-
-def main():
-
-    window, impl, font, symbol_font = init()
-
-    app_state = new_app_state(font, symbol_font)
-
+def post_init(app_state: AppState):
     try:
         setup_app_data()
     except OSError as err:
@@ -298,7 +292,7 @@ def main():
             "Please report this to the developers.")
 
     try:
-        app_state.setting = load_setting()
+        app_state.setting = setting.load_setting()
         set_data_path(app_state.setting.data)
         if not os.path.exists(get_data_path()):
             app_state.warning_modals.append(MessageModalState(
@@ -312,14 +306,26 @@ def main():
                 f" and restart. Reason: {err}."
             )
 
-    while not glfw.window_should_close(window):
-        if not render(window, impl, app_state):
-            break
+    try:
+        app_state.db = SQLiteDatabase(config_sqlite_conn("database"))
+    except sqlite3.Error as err:
+        app_state.warning_modals.append(MessageModalState(
+            f"Failed to load database. Reason: {err}"))
 
-    app_state.setting != None and app_state.setting.save() # type: ignore
 
-    impl.shutdown()
-    glfw.terminate()
+def setup_app_data():
+    """
+    @exception
+    - OSError
+    """
+    if os.path.exists(TMP):
+        # Try-Except Block
+        shutil.rmtree(TMP)
+    os.mkdir(TMP)
+
+
+def before_exit(app_state: AppState):
+    app_state.setting != None and app_state.setting.save()
 
 
 if __name__ == "__main__":
@@ -329,4 +335,4 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as err:
-        logger.error(err)
+        logger.critical(err)
