@@ -1,6 +1,8 @@
 import os
 import pickle
 
+from collections import deque
+
 import fileutil
 
 
@@ -9,7 +11,7 @@ class Setting:
     def __init__(
             self,
             data: str = "",
-            recent_files: list[str] = [],
+            recent_files: deque[str] = deque(maxlen=5),
             workspace_paths: set[str] = set()):
         self.data = data
         self.recent_files = recent_files
@@ -40,6 +42,11 @@ class Setting:
                                     if os.path.exists(p)])
         return self.workspace_paths
 
+    def update_recent_file(self, recent_file: str):
+        if recent_file in self.recent_files:
+            self.recent_files.remove(recent_file)
+        self.recent_files.appendleft(recent_file)
+
 
 def load_setting(path: str = "setting.pickle") -> Setting:
     """
@@ -59,11 +66,11 @@ def load_setting(path: str = "setting.pickle") -> Setting:
                              "Setting.")
 
         if not hasattr(setting, "recent_files"):
-            setting.recent_files = []
+            setting.recent_files = deque(maxlen=5) 
 
-        setting.recent_files = [fileutil.to_posix(f) 
+        setting.recent_files = deque([fileutil.to_posix(f) 
                                 for f in setting.recent_files
-                                if os.path.exists(f)]
+                                if os.path.exists(f)], maxlen=5)
         setting.save()
 
         return setting
