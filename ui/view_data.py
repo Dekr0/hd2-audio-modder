@@ -1,7 +1,6 @@
 from collections import deque
 from collections.abc import Callable
 import enum
-import sqlite3
 from typing import Any
 import uuid
 
@@ -216,7 +215,7 @@ class AppState:
 
     db: SQLiteDatabase | None
 
-    setting: Setting | None
+    setting: Setting
 
     font: imgui.ImFont | None
     symbol_font: imgui.ImFont | None
@@ -279,7 +278,7 @@ def new_app_state():
             FilePicker(), FolderPicker(),
             sound_handler,
             None,
-            None,
+            Setting(),
             None, None,
             [new_bank_explorer_states(sound_handler)],
             None, deque(), deque())
