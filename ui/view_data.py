@@ -1,5 +1,8 @@
 from collections import deque
+from collections.abc import Callable
 import enum
+import sqlite3
+from typing import Any
 import uuid
 
 # Definition import
@@ -8,11 +11,12 @@ from dataclasses import dataclass
 # Module import
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
-from backend.core import AudioSource, FileHandler, HircEntry
-from backend.core import MusicSegment, RandomSequenceContainer, Sound
-from backend.core import SoundHandler
+import backend.db.db_schema_map as orm
 
-from backend.const import VORBIS
+from backend.core import AudioSource, FileHandler, HircEntry
+from backend.core import SoundHandler
+from backend.db.db_access import SQLiteDatabase
+
 from setting import Setting
 
 
@@ -58,16 +62,17 @@ class BankExplorerTableHeader(enum.StrEnum):
 
 class BankExplorerTableType(enum.StrEnum):
 
-    AUDIO_SOURCE    = "Audio Source"
-    EVENT           = "Event"
-    MUSIC_SEGMENT   = "Music Segement"
-    MUSIC_TRACK     = "Music Track"
-    RANDOM_SEQ_CNTR = "Random / Sequence"
-    ROOT            = "Root"
-    SEPARATOR       = "Separator"
-    SOUNDBANK       = "Soundbank"
-    STRING          = "String"
-    TEXT_BANK       = "Text Bank"
+    AUDIO_SOURCE       = "Audio Source"
+    AUDIO_SOURCE_MUSIC = "Audio Source (Music)"
+    EVENT              = "Event"
+    MUSIC_SEGMENT      = "Music Segement"
+    MUSIC_TRACK        = "Music Track"
+    RANDOM_SEQ_CNTR    = "Random / Sequence"
+    ROOT               = "Root"
+    SEPARATOR          = "Separator"
+    SOUNDBANK          = "Soundbank"
+    STRING             = "String"
+    TEXT_BANK          = "Text Bank"
 
 
 class FilePicker:
@@ -172,12 +177,16 @@ class BankViewerState:
         - quick access on node in terms of query node when handling selection 
         for tree structure
     """
-    source_view_root: 'HierarchyView'
-    source_views_linear: list['HierarchyView']
+    # source_view_root: 'HierarchyView'
+    # source_views_linear: list['HierarchyView']
     hirc_view_root: 'HierarchyView'
     hirc_views_linear: list['HierarchyView']
 
     imgui_selection_store: imgui.SelectionBasicStorage
+
+    hierarchy_views_banks: dict[str, dict[int, orm.HierarchyObjectView]]
+
+    changed_hierarchy_views: dict[int, 'HierarchyView']
 
     source_view: bool = True
 
@@ -190,6 +199,14 @@ class MessageModalState:
 
 
 @dataclass
+class ConfirmModalState:
+
+    msg: str
+    is_trigger: bool = False
+    callback: Callable[[bool], Any] | None = None
+
+
+@dataclass
 class AppState:
 
     archive_picker: FilePicker
@@ -197,15 +214,19 @@ class AppState:
 
     sound_handler: SoundHandler
 
+    db: SQLiteDatabase | None
+
     setting: Setting | None
 
-    font: imgui.ImFont
-    symbol_font: imgui.ImFont
+    font: imgui.ImFont | None
+    symbol_font: imgui.ImFont | None
 
     bank_states: list[BankViewerState]
 
     critical_modal: MessageModalState | None
     warning_modals: deque[MessageModalState]
+    confirm_modals: deque[ConfirmModalState]
+    test: str = ""
 # [End]
 
 
@@ -222,6 +243,7 @@ class HierarchyView:
     view_id: int
     parent_view_id: int | None
     hirc_ul_ID: int
+    source_id: int
     default_label: str
     hirc_entry_type: BankExplorerTableType
     user_defined_label: str
@@ -232,258 +254,32 @@ def new_hirc_view_root():
     return HierarchyView(
             None,
             TREE_ROOT_VIEW_ID, None, 
-            -1, "", 
+            -1, -1, "", 
             BankExplorerTableType.ROOT, "", [])
 
 
 def new_bank_explorer_states(sound_handler: SoundHandler):
     return BankViewerState(
-            uuid.uuid4().hex,
-            FileHandler(),
-            FilePicker(), 
-            sound_handler,
-            new_hirc_view_root(), [],
-            new_hirc_view_root(), [],
-            imgui.SelectionBasicStorage())
-
-
-def new_app_state(font, symbol_font):
-    sound_handler = SoundHandler()
-    return AppState(
+            uuid.uuid4().hex, # id
+            FileHandler(), # backend
             FilePicker(),
-            FolderPicker(),
+            sound_handler,
+            # new_hirc_view_root(), [], # source view
+            new_hirc_view_root(), [], # hirc. view
+            imgui.SelectionBasicStorage(),  # selection storage
+            {}, # DB data
+            {}  # DB change bus
+        )
+
+
+def new_app_state():
+    sound_handler = SoundHandler()
+
+    return AppState(
+            FilePicker(), FolderPicker(),
             sound_handler,
             None,
-            font, symbol_font,
+            None,
+            None, None,
             [new_bank_explorer_states(sound_handler)],
-            None, deque())
-
-
-def create_bank_hierarchy_view(bank_state: BankViewerState):
-    root = bank_state.hirc_view_root
-    bank_hirc_views = root.children
-    bank_hirc_views_linear = bank_state.hirc_views_linear
-
-    bank_hirc_views.clear()
-    bank_hirc_views_linear.clear()
-
-    file_handler = bank_state.file_handler
-    banks = file_handler.get_wwise_banks()
-
-    contained_sounds: set[Sound] = set()
-    if root.view_id != 0:
-        raise AssertionError("Invisible root view must always has an `view_id`"
-                             " of 0")
-    idx = root.view_id
-
-    bank_hirc_views_linear.append(root)
-    idx += 1
-
-    for bank in banks.values():
-        if bank.hierarchy == None:
-            # Logging
-            continue
-
-        bank_view = HierarchyView(
-                None,
-                idx, root.view_id,
-                bank.get_id(), bank.get_name().replace("content/audio/", ""),
-                BankExplorerTableType.SOUNDBANK, 
-                "--", [])
-        bank_hirc_views.append(bank_view)
-        bank_hirc_views_linear.append(bank_view)
-        idx += 1
-
-        children = bank_view.children
-        bank_idx = bank_view.view_id
-        hirc_entries = bank.hierarchy.entries
-        for hirc_entry in hirc_entries.values():
-            if isinstance(hirc_entry, MusicSegment):
-                segment_id = hirc_entry.get_id()
-                segment_view = HierarchyView(
-                        hirc_entry,
-                        idx, bank_idx,
-                        segment_id, f"Segment {segment_id}",
-                        BankExplorerTableType.MUSIC_SEGMENT,
-                        "", [])
-                children.append(segment_view)
-                bank_hirc_views_linear.append(segment_view)
-                idx += 1
-
-                segment_view_id = segment_view.view_id
-
-                for track_id in hirc_entry.tracks:
-                    track = hirc_entries[track_id]
-                    track_view = HierarchyView(
-                            track,
-                            idx, segment_view_id, 
-                            track_id, f"Track {track_id}", 
-                            BankExplorerTableType.MUSIC_TRACK, 
-                            "", [])
-                    segment_view.children.append(track_view)
-                    bank_hirc_views_linear.append(track_view)
-                    idx += 1 
-
-                    track_view_id = track_view.view_id
-                    for source_struct in track.sources:
-                        if source_struct.plugin_id != VORBIS:
-                            continue
-
-                        source_id = source_struct.source_id
-                        audio_source = file_handler.get_audio_by_id(source_id)
-                        if  audio_source == None:
-                            # Logging?
-                            continue
-
-                        source_view = HierarchyView(
-                                audio_source,
-                                idx, track_view_id,
-                                source_id, f"{source_id}.wem",
-                                BankExplorerTableType.AUDIO_SOURCE,
-                                "", [])
-                        track_view.children.append(source_view)
-                        bank_hirc_views_linear.append(source_view)
-                        idx += 1 
-
-                    for info in track.track_info:
-                        if info.event_id == 0:
-                            # Logging?
-                            continue
-
-                        info_id = info.get_id()
-                        info_view = HierarchyView(
-                                info,
-                                idx, track_view_id,
-                                info_id, f"Event {info_id}", 
-                                BankExplorerTableType.EVENT, 
-                                "", [])
-                        track_view.children.append(info_view)
-                        bank_hirc_views_linear.append(info_view)
-                        idx += 1
-
-            elif isinstance(hirc_entry, RandomSequenceContainer):
-                cntr_id = hirc_entry.get_id()
-                cntr_view = HierarchyView(
-                        hirc_entry,
-                        idx, bank_idx,
-                        cntr_id, f"Random / Sequence Container {cntr_id}",
-                        BankExplorerTableType.RANDOM_SEQ_CNTR,
-                        "", [])
-                children.append(cntr_view)
-                bank_hirc_views_linear.append(cntr_view)
-                idx += 1
-
-                cntr_view_id = cntr_view.view_id
-                for entry_id in hirc_entry.contents:
-                    entry = hirc_entries[entry_id] 
-                    if not isinstance(entry, Sound):
-                        # Logging
-                        continue
-
-                    if len(entry.sources) <= 0 or entry.sources[0].plugin_id != VORBIS:
-                        continue
-
-                    source_id = entry.sources[0].source_id
-                    audio_source = file_handler.get_audio_by_id(source_id)
-                    if audio_source == None:
-                        # Logging?
-                        continue
-
-                    contained_sounds.add(entry)
-
-                    source_view = HierarchyView(
-                            audio_source,
-                            idx, cntr_view_id,
-                            source_id, f"{source_id}.wem",
-                            BankExplorerTableType.AUDIO_SOURCE,
-                            "", [])
-                    cntr_view.children.append(source_view)
-                    bank_hirc_views_linear.append(source_view)
-                    idx += 1
-                
-        for hirc_entry in hirc_entries.values():
-            if not isinstance(hirc_entry, Sound) or hirc_entry in contained_sounds:
-                continue
-
-            source_id = hirc_entry.sources[0].source_id
-            audio_source = file_handler.get_audio_by_id(source_id)
-            if audio_source == None:
-                # Logging?
-                continue
-
-            source_view = HierarchyView(
-                    audio_source,
-                    idx, bank_idx,
-                    source_id, f"{source_id}.wem",
-                    BankExplorerTableType.AUDIO_SOURCE,
-                    "", [])
-            children.append(source_view)
-            bank_hirc_views_linear.append(source_view)
-            idx += 1
-
-
-def create_bank_source_view(bank_viewer_state: BankViewerState):
-    root = bank_viewer_state.source_view_root
-    bank_source_views = root.children
-    bank_source_views_linear = bank_viewer_state.source_views_linear
-
-    bank_source_views.clear()
-    bank_source_views_linear.clear()
-
-    file_handler = bank_viewer_state.file_handler
-    banks = file_handler.get_wwise_banks()
-
-    memo: set[int] = set()
-    if root.view_id != 0:
-        raise AssertionError("Invisible root view must always has an `view_id`"
-                             " of 0")
-    idx = root.view_id
-
-    bank_source_views_linear.append(root)
-    idx += 1
-
-    for bank in banks.values():
-        if bank.hierarchy == None:
-            # Logging
-            continue
-        memo.clear()
-
-        bank_view = HierarchyView(
-                None,
-                idx, root.view_id,
-                bank.get_id(), bank.get_name().replace("content/audio/", ""),
-                BankExplorerTableType.SOUNDBANK, 
-                "--", 
-                [])
-        bank_source_views.append(bank_view)
-        bank_source_views_linear.append(bank_view)
-        idx += 1
-
-        children = bank_view.children 
-        bank_idx = bank_view.view_id
-
-        for hirc_entry in bank.hierarchy.entries.values():
-            if len(hirc_entry.sources) <= 0:
-                continue
-
-            for source in hirc_entry.sources:
-                source_id = source.source_id
-                if source.plugin_id != VORBIS or source_id in memo:
-                    continue
-
-                audio_source = file_handler.get_audio_by_id(source_id)
-                if audio_source == None:
-                    # Logging
-                    continue
-
-                source_view = HierarchyView(
-                    audio_source,
-                    idx, bank_idx, 
-                    source_id, f"{source_id}.wem",
-                    BankExplorerTableType.AUDIO_SOURCE,
-                    "", [])
-                children.append(source_view)
-                bank_source_views_linear.append(source_view)
-                idx += 1
-
-                memo.add(source_id)
+            None, deque(), deque())
