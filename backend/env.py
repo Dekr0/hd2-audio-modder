@@ -5,7 +5,6 @@ import posixpath
 import sys
 
 import fileutil
-import ui.one_shot_ui as one_shot_ui
 
 from log import logger
 
@@ -39,8 +38,6 @@ match SYSTEM:
             )
         else:
             logger.warning("Failed to locate WwiseConsole.exe")
-            one_shot_ui.show_warning("Missing Essential Tool",
-                                     "Failed to locate WwiseConsole.exe")
         SYS_CLIPBOARD = "clip"
     case "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
