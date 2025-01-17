@@ -50,7 +50,7 @@ When presenting on the UI, we shouldn't just show the audio source itself
 because we can have two `Sound` object with two different ID but both of them 
 contain the same audio source.
 """
-class BankExplorerTableHeader(enum.StrEnum):
+class BankViewerTableHeader(enum.StrEnum):
 
     DEFAULT_LABEL = "Default Label"
     FAV = ""
@@ -59,7 +59,7 @@ class BankExplorerTableHeader(enum.StrEnum):
     USER_DEFINED_LABEL = "User Defined Label"
 
 
-class BankExplorerTableType(enum.StrEnum):
+class BankViewerTableType(enum.StrEnum):
 
     AUDIO_SOURCE       = "Audio Source"
     AUDIO_SOURCE_MUSIC = "Audio Source (Music)"
@@ -220,12 +220,14 @@ class AppState:
     font: imgui.ImFont | None
     symbol_font: imgui.ImFont | None
 
-    bank_states: list[BankViewerState]
+    bank_states: dict[str, BankViewerState]
+    bank_id_to_window_name: dict[str, str]
 
+    # callback queue
     critical_modal: MessageModalState | None
     warning_modals: deque[MessageModalState]
     confirm_modals: deque[ConfirmModalState]
-    test: str = ""
+    load_archives_queue: deque[Callable[..., None]]
 # [End]
 
 
@@ -244,7 +246,7 @@ class HierarchyView:
     hirc_ul_ID: int
     source_id: int
     default_label: str
-    hirc_entry_type: BankExplorerTableType
+    hirc_entry_type: BankViewerTableType
     user_defined_label: str
     children: list['HierarchyView']
 
@@ -254,10 +256,10 @@ def new_hirc_view_root():
             None,
             TREE_ROOT_VIEW_ID, None, 
             -1, -1, "", 
-            BankExplorerTableType.ROOT, "", [])
+            BankViewerTableType.ROOT, "", [])
 
 
-def new_bank_explorer_states(sound_handler: SoundHandler):
+def new_bank_viewer_state(sound_handler: SoundHandler):
     return BankViewerState(
             uuid.uuid4().hex, # id
             FileHandler(), # backend
@@ -273,12 +275,16 @@ def new_bank_explorer_states(sound_handler: SoundHandler):
 
 def new_app_state():
     sound_handler = SoundHandler()
+    
+    inital_state = new_bank_viewer_state(sound_handler)
 
     return AppState(
-            FilePicker(), FolderPicker(),
-            sound_handler,
-            None,
-            Setting(),
-            None, None,
-            [new_bank_explorer_states(sound_handler)],
-            None, deque(), deque())
+            FilePicker(), FolderPicker(), # picker
+            sound_handler, # sound handler
+            None, # db connection 
+            Setting(), # setting
+            None, None, # fonts
+            {"Bank Viewer": inital_state}, # bank states
+            {inital_state.id: "Bank Viewer"}, # window names
+            None, 
+            deque(), deque(), deque())
