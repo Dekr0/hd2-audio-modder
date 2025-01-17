@@ -272,6 +272,10 @@ def run_confirm_modal(app_state: AppState):
         confirm_modals.popleft()
         return
 
+    imgui.set_item_default_focus()
+
+    imgui.same_line()
+
     if imgui.button("No"):
         if callback != None:
             callback(False)
