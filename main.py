@@ -1,6 +1,7 @@
 import gc
 import os
 import pickle
+import sqlite3
 import shutil
 
 import setting
@@ -8,12 +9,15 @@ import setting
 # Module import
 from imgui_bundle import hello_imgui, imgui
 
-from backend.db.db_access import config_sqlite_conn
+from backend.db.db_access import config_sqlite_conn, SQLiteDatabase
 from backend.env import *
-from log import logger
+from main_ctrl import main_open_archive_new_viewer
+from ui.bank_viewer.load_archive_ctrl import close_bank_state
 from ui.ui_flags import *
-from ui.ui_bank_explorer import *
-from ui.view_data import *
+from ui.bank_viewer.draw_gui import gui_bank_viewer
+from ui.bank_viewer.view_ctrl import save_hierarchy_object_views_change
+from ui.view_data import AppState, ConfirmModalState, MessageModalState
+from ui.view_data import new_app_state
 
 NTHREAD = 8
 
@@ -49,6 +53,7 @@ def main():
     )
 
     runner_params.callbacks.show_gui = lambda: gui(app_state)
+    runner_params.callbacks.pre_new_frame = lambda: run_task(app_state)
 
     hello_imgui.run(
         runner_params
@@ -56,6 +61,10 @@ def main():
 
 
 def load_fonts(app_state: AppState):
+    """
+    @exception
+    - ???
+    """
 
     app_state.font = hello_imgui.load_font("fonts/blex_mono_nerd_font.ttf", 18)
 
@@ -74,9 +83,10 @@ def show_menus(
 
 
 def gui(app_state: AppState):
-    archive_picker = app_state.archive_picker
-    data_folder_picker = app_state.data_folder_picker
-
+    """
+    @exception
+    - AssertionError
+    """
     bank_states = app_state.bank_states
 
     if run_critical_modal(app_state):
@@ -84,65 +94,34 @@ def gui(app_state: AppState):
     run_warning_modal(app_state)
     run_confirm_modal(app_state)
 
-    closed_banks: list[BankViewerState] = []
-    for bank_state in bank_states:
-        is_close = gui_bank_explorer(app_state, bank_state)
+    # gui_debug_state_windows(app_state)
+
+    close_archives_queue = app_state.closed_bank_viewer_queue
+    for bank_state_id, bank_state in bank_states.items():
+        is_close = gui_bank_viewer(app_state, bank_state)
         if not is_close:
-            closed_banks.append(bank_state)
+            close_archives_queue.append(bank_state_id)
 
-    num_closed_bank = len(closed_banks)
-    for bank_state in closed_banks:
-        if len(bank_state.changed_hierarchy_views.items()) <= 0:
-            bank_states.remove(bank_state)
-            continue
 
-        def callback(save: bool):
-            if save:
-                save_hierarchy_object_views_change_with_modal(app_state,
-                                                              bank_state)
-            bank_states.remove(bank_state)
+def gui_debug_state_windows(app_state: AppState):
+    ok, _ = imgui.begin("Debug State")
+    if ok:
+        if imgui.tree_node(f"Bank states ({len(app_state.bank_states)})"):
+            for bid, state in app_state.bank_states.items():
+                imgui.text(f"{bid}: {state.file_handler.file_reader.path}")
+            imgui.tree_pop()
 
-        app_state.confirm_modals.append(ConfirmModalState(
-            "There are unsave changes. Do you want to save before closing "
-            "this bank explorer?",
-            callback = callback
-        ))
+        if imgui.tree_node(f"Loaded files ({len(app_state.loaded_files)})"):
+            for path in app_state.loaded_files:
+                imgui.text(path)
+            imgui.tree_pop()
 
-        break
+        imgui.text(f"Closed archives in queue count: {len(app_state.closed_bank_viewer_queue)}")
 
-    closed_banks.clear()
-    if num_closed_bank > 0:
-        gc.collect()
+        imgui.end()
+        return
 
-    if archive_picker.is_ready():
-        result = archive_picker.get_result()
-        for archive in result:
-            new_bank_explorer_state = new_bank_explorer_states(app_state.sound_handler)
-            try:
-                new_bank_explorer_state.file_handler.load_archive_file(archive)
-                bank_states.append(new_bank_explorer_state)
-                fetch_bank_hierarchy_object_view(app_state, new_bank_explorer_state)
-                create_bank_hierarchy_view(new_bank_explorer_state)
-                gui_bank_explorer(app_state, new_bank_explorer_state)
-            except OSError as e:
-                # show modal or display on the logger
-                logger.error(e)
-            except sqlite3.Error as e:
-                # show modal or display on the logger
-                logger.error(e)
-            except Exception as e:
-                # show modal or display on the logger
-                logger.error(e)
-
-        archive_picker.reset()
-
-    if data_folder_picker.is_ready():
-        result = data_folder_picker.get_result() 
-        if app_state.setting == None:
-            raise AssertionError("setting is None")
-        app_state.setting.data = result
-        set_data_path(result)
-        data_folder_picker.reset()
+    imgui.end()
 
 
 def gui_file_menu(app_state: AppState):
@@ -155,10 +134,16 @@ def gui_file_menu(app_state: AppState):
 
 
 def gui_archive_menu(app_state: AppState):
+    """
+    @exception
+    - ???
+    """
     archive_picker = app_state.archive_picker
 
     if not imgui.begin_menu("Load Archive"):
         return
+
+    gui_archive_menu_recent(app_state)
 
     if imgui.menu_item_simple("From Helldivers 2 Data Folder"):
         if os.path.exists(get_data_path()):
@@ -173,13 +158,34 @@ def gui_archive_menu(app_state: AppState):
                 f"The directory path for Helldivers 2 data folder in the setting "
                 " is not correct. Please set the correct path in the Setting."
             ))
+
     if imgui.menu_item_simple("From File Explorer"):
         try:
-            archive_picker.schedule("Select An Archive")
+            archive_picker.schedule("Select An Archive", multi=True)
         except AssertionError:
             app_state.warning_modals.append(
                 MessageModalState("Please finish the current archive selection.")
             )
+
+
+    imgui.end_menu()
+
+
+def gui_archive_menu_recent(app_state: AppState):
+    recent_files = app_state.setting.recent_files
+
+    if len(recent_files) <= 0:
+        imgui.menu_item_simple("From Recent", enabled=False)
+        return
+
+    if not imgui.begin_menu("From Recent"):
+        return
+
+    for recent_file in recent_files:
+        if imgui.menu_item_simple(recent_file):
+            main_open_archive_new_viewer(app_state, recent_file)
+            break
+
     imgui.end_menu()
 
 
@@ -287,6 +293,64 @@ def run_confirm_modal(app_state: AppState):
     imgui.end_popup()
 
 
+def run_task(app_state: AppState):
+    archive_picker = app_state.archive_picker
+    data_folder_picker = app_state.data_folder_picker
+
+    if archive_picker.is_ready():
+        results = archive_picker.get_result()
+        for result in results:
+            main_open_archive_new_viewer(app_state, result)
+
+        archive_picker.reset()
+
+    run_closed_bank_queue(app_state)
+
+    while len(app_state.load_archives_queue) > 0:
+        app_state.load_archives_queue.popleft()()
+
+    if data_folder_picker.is_ready():
+        results = data_folder_picker.get_result() 
+        app_state.setting.data = results
+        set_data_path(results)
+        data_folder_picker.reset()
+
+
+def run_closed_bank_queue(app_state: AppState):
+    bank_states = app_state.bank_states
+
+    closed_bank_viewer_queue = app_state.closed_bank_viewer_queue
+
+    num_closed_bank = len(closed_bank_viewer_queue)
+    while len(closed_bank_viewer_queue) > 0:
+        bank_state_id = closed_bank_viewer_queue.popleft()
+
+        if bank_state_id not in bank_states:
+            raise AssertionError(f"{bank_state_id} does not have an associate bank"
+                                 " state.")
+
+        bank_state = bank_states[bank_state_id]
+        if len(bank_state.changed_hierarchy_views.items()) <= 0:
+            close_bank_state(app_state, bank_state_id)
+            continue
+
+        def callback(save: bool):
+            if save:
+                save_hierarchy_object_views_change(app_state, bank_state)
+            close_bank_state(app_state, bank_state_id)
+
+        app_state.confirm_modals.append(ConfirmModalState(
+            "There are unsave changes. Do you want to save before closing "
+            "this bank viewer?",
+            callback = callback
+        ))
+
+        break
+
+    if num_closed_bank > 0:
+        gc.collect()
+
+
 def post_init(app_state: AppState):
     try:
         setup_app_data()
@@ -336,7 +400,4 @@ if __name__ == "__main__":
     """
     !!! Remove this once the UI is stable enough.
     """
-    try:
-        main()
-    except Exception as err:
-        logger.critical(err)
+    main()
