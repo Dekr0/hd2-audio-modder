@@ -3,26 +3,10 @@
 - This branch contains the upcoming new UI for the audio and text modding tool 
 for Helldivers 2. For the original README.md, please refer to [here](https://github.com/RaidingForPants/hd2-audio-modder).
 
-https://github.com/user-attachments/assets/ab0a2163-5668-457f-aad6-7bf672c7632b
+## Installation
 
-## Prerequisite
-
-- Make sure you install the following for the operating system you're using:
-    - Python (https://www.python.org/downloads/)
-
-## How To Run
-
-- [Download](https://github.com/Dekr0/hd2-audio-modder/archive/refs/heads/new_ui.zip) 
-the zipped source code of this branch.
-- Unzip the zipped source code
-- If you're on Windows,
-    - (Only once) right click on `configure.ps1`, and click on "Run With 
-    PowerShell". This will install the necessary dependencies to run the new 
-    UI.
-    - (Every time) to launch the tool , right click on `run.ps1`, and click on 
-    "Run With PowerShell".
-- If you're on Linux or MacOS,
-    - Under construction.
+- Download the latest release in [here](https://github.com/Dekr0/hd2-audio-modder/releases/tag/v0.0.0-exp).
+- Unzip the compressed files. Please do not make the uncompressed files around.
 
 ## Expectation
 
