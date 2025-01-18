@@ -101,6 +101,8 @@ class FilePicker:
                 msg, 
                 default_path)
 
+    def is_schedule(self):
+        return self.file_picker != None
 
     def is_ready(self):
         return self.file_picker != None and self.file_picker.ready()
@@ -183,8 +185,6 @@ class BankViewerState:
 
     imgui_selection_store: imgui.SelectionBasicStorage
 
-    hierarchy_views_banks: dict[str, dict[int, orm.HierarchyObjectView]]
-
     changed_hierarchy_views: dict[int, 'HierarchyView']
 
     source_view: bool = True
@@ -215,19 +215,25 @@ class AppState:
 
     db: SQLiteDatabase | None
 
+    # DB data
+    hierarchy_views_all: dict[int, orm.HierarchyObjectView]
+
     setting: Setting
 
     font: imgui.ImFont | None
     symbol_font: imgui.ImFont | None
 
     bank_states: dict[str, BankViewerState]
-    bank_id_to_window_name: dict[str, str]
+    loaded_files: set[str]
 
-    # callback queue
+    # modal queue
     critical_modal: MessageModalState | None
     warning_modals: deque[MessageModalState]
     confirm_modals: deque[ConfirmModalState]
+
+    # task queue
     load_archives_queue: deque[Callable[..., None]]
+    closed_bank_viewer_queue: deque[str]
 # [End]
 
 
@@ -265,11 +271,9 @@ def new_bank_viewer_state(sound_handler: SoundHandler):
             FileHandler(), # backend
             FilePicker(),
             sound_handler,
-            # new_hirc_view_root(), [], # source view
             new_hirc_view_root(), [], # hirc. view
             imgui.SelectionBasicStorage(),  # selection storage
-            {}, # DB data
-            {}  # DB change bus
+            {}, # DB change bus
         )
 
 
@@ -282,9 +286,10 @@ def new_app_state():
             FilePicker(), FolderPicker(), # picker
             sound_handler, # sound handler
             None, # db connection 
+            {}, # db data
             Setting(), # setting
             None, None, # fonts
-            {"Bank Viewer": inital_state}, # bank states
-            {inital_state.id: "Bank Viewer"}, # window names
+            {inital_state.id: inital_state}, # bank states
+            set(), # window names
             None, 
-            deque(), deque(), deque())
+            deque(), deque(), deque(), deque())
