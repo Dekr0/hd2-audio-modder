@@ -53,15 +53,11 @@ def gui_bank_viewer(
     if archive_picker.is_ready():
         result = archive_picker.get_result()
 
-        if len(result) > 1:
-            raise AssertionError("More than one file path is return when loading"
-                                 " archive for an existing bank explorer")
-        app_state \
-                .load_archives_queue \
-                .append(lambda:
-                        gui_bank_viewer_load_archive(app_state,
-                                                     bank_state,
-                                                     result[0]))
+        if len(result) > 0:
+            app_state \
+                    .load_archives_queue \
+                    .append(lambda: gui_bank_viewer_load_archive(
+                        app_state, bank_state, result[0]))
         archive_picker.reset()
 
     imgui.end()
