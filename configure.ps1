@@ -19,11 +19,9 @@ function Build() {
 
     python setup.py build
 
-    cp fonts build/exe.win-amd64-3.12
-    cp vgmstream-win64/ build/exe.win-amd64-3.12
-
     $compress = @{
         Path = "build/exe.win-amd64-3.12/*"
+        CompressionLevel = "Fastest"
         DestinationPath = "release.zip"
     }
 
