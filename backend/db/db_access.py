@@ -1,4 +1,5 @@
 import sqlite3
+import os
 
 from typing import Callable
 
@@ -17,6 +18,10 @@ def config_sqlite_conn(db_path: str):
         nonlocal conn
         if conn != None:
             return conn
+
+        if not os.path.exists(db_path):
+            raise OSError(f"Database {db_path} does not exists.")
+
         conn = sqlite3.connect(db_path)
         return conn
 

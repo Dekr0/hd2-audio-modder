@@ -378,7 +378,11 @@ def post_init(app_state: AppState):
         app_state.db = SQLiteDatabase(config_sqlite_conn("database"))
     except sqlite3.Error as err:
         app_state.warning_modals.append(MessageModalState(
-            f"Failed to load database. Reason: {err}"))
+            f"Failed to load database. Database functionalities will be disabled. Reason: {err}"))
+    except OSError as err:
+        app_state.warning_modals.append(MessageModalState(
+            f"Failed to locate database. Database functionalities will be disabled."
+        ))
 
 
 def setup_app_data():
