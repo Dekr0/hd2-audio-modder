@@ -19,8 +19,10 @@ priority.
 
 ## Report Bugs
 
-- This version of the tool is actively under development. Please report bugs as 
+- This version of the tool is actively under development. Please report bugs if 
 there's one.
+- If the tool crash, try to run the tool in powershell or command prompt to reproduce 
+ detail error message.
 
 ## For Contributors
 
