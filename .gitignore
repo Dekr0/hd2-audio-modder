@@ -11,3 +11,5 @@ vgmstream-macos/
 AudioConversionTemplate/
 **/imgui.ini
 test_mockup/
+**/database
+**/*.ini
