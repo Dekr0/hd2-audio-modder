@@ -1,13 +1,15 @@
 # Module import
 import os
+import posixpath
 import sqlite3
 import subprocess
 from imgui_bundle import imgui
 
 from backend.core import AudioSource
 from backend.env import get_data_path
+import fileutil
 from ui.bank_viewer.ctx_menu_ctrl import copy_audio_entry
-from ui.bank_viewer.load_archive_ctrl import  open_archive_exist_viewer, update_bank_state_window_name
+from ui.bank_viewer.load_archive_ctrl import open_archive_exist_viewer
 from ui.bank_viewer.tree_selection_impl import apply_selection_reqs 
 from ui.bank_viewer.view_ctrl import save_hierarchy_object_views_change
 from ui.ui_flags import * 
@@ -19,22 +21,32 @@ from log import logger
 
 
 def gui_bank_viewer(
-        app_state: AppState, 
-        window_name: str, 
-        bank_state: BankViewerState):
+        app_state: AppState, bank_state: BankViewerState):
     """
     @exception
     - AssertionError
     """
+    archive_picker = bank_state.archive_picker
 
-    ok, p_open = imgui.begin(window_name, True, imgui.WindowFlags_.menu_bar.value)
+    window_name = "Bank Viewer"
+    file_reader = bank_state.file_handler.file_reader
+    if file_reader.path != "":
+        window_name = f"{posixpath.basename(file_reader.path)} ({file_reader.path})"
+
+    ok, is_open = imgui.begin(window_name, True, imgui.WindowFlags_.menu_bar.value)
+    if not is_open and archive_picker.is_schedule():
+        app_state.warning_modals.append(MessageModalState(
+            "Please close the current active file picker before closing this"
+            " bank viewer",
+            ))
+        is_open = True
+
     if not ok:
         imgui.end()
-        return p_open
+        
+        return is_open
 
     gui_bank_viewer_menu(app_state, bank_state)
-
-    archive_picker = bank_state.archive_picker
 
     gui_bank_viewer_table(app_state, bank_state)
 
@@ -44,20 +56,24 @@ def gui_bank_viewer(
         if len(result) > 1:
             raise AssertionError("More than one file path is return when loading"
                                  " archive for an existing bank explorer")
-        app_state.load_archives_queue.append(lambda: \
-                gui_bank_viewer_load_archive(app_state, bank_state, result[0]))
+        app_state \
+                .load_archives_queue \
+                .append(lambda:
+                        gui_bank_viewer_load_archive(app_state,
+                                                     bank_state,
+                                                     result[0]))
         archive_picker.reset()
 
     imgui.end()
 
-    return p_open
+    return is_open
 
 
 def gui_bank_viewer_load_archive(
         app_state: AppState, bank_state: BankViewerState, file_path: str):
+    file_path = fileutil.to_posix(file_path)
     try:
         open_archive_exist_viewer(app_state, bank_state, file_path)
-        update_bank_state_window_name(app_state, bank_state)
         app_state.setting.update_recent_file(file_path)
     except OSError as e:
         # show modal or display on the logger
@@ -514,5 +530,3 @@ def gui_bank_table_item_ctx_menu(
         imgui.end_menu()
 
     imgui.end_popup()
-
-
