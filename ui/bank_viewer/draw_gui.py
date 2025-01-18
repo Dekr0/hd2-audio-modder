@@ -313,7 +313,8 @@ def gui_bank_viewer_table_row_source_view(
         imgui.tree_pop()
 
         return
-    elif hirc_view.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE:
+    elif hirc_view.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE or \
+         hirc_view.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE_MUSIC:
         imgui.table_next_row()
 
         # [Column 0: Favorite]
