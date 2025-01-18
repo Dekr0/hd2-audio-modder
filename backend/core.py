@@ -1,5 +1,6 @@
 import numpy
 import os
+import posixpath
 import pyaudio
 import subprocess
 import struct
@@ -8,6 +9,8 @@ import xml.etree.ElementTree as etree
 
 from itertools import takewhile
 from math import ceil
+
+import fileutil
 
 from backend.const import *
 from backend.env import *
@@ -1089,6 +1092,8 @@ class TextBank:
 class FileReader:
     
     def __init__(self):
+        self.name = ""
+        self.path = ""
         self.wwise_streams = {}
         self.wwise_banks = {}
         self.audio_sources = {}
@@ -1097,7 +1102,8 @@ class FileReader:
         self.string_entries = {}
         self.music_segments = {}
         
-    def from_file(self, path):
+    def from_file(self, path: str):
+        path = fileutil.to_posix(path)
         self.name = os.path.basename(path)
         self.path = path
         toc_file = MemoryStream()
@@ -1830,7 +1836,7 @@ class FileHandler:
             raise OSError(f"Archive file {archive_file} does not exist.")
 
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
-            archive_file = os.path.splitext(archive_file)[0]
+            archive_file = posixpath.splitext(archive_file)[0]
         if not os.path.exists(archive_file):
             raise OSError(f"Archive file {archive_file} does not exist.")
 
