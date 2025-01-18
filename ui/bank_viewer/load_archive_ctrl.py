@@ -12,14 +12,23 @@ def open_archive_new_viewer(app_state: AppState, file_path: str):
     @exception
     - OSError
     - sqlite3.Error
-    - Exception
+    - AssertionError
     """
+    if file_path in app_state.loaded_files:
+        return None
+
     new_state = new_bank_viewer_state(app_state.sound_handler)
 
-    new_state.file_handler.load_archive_file(file_path)
+    file_handler = new_state.file_handler
+    file_handler.load_archive_file(file_path)
+    if file_handler.file_reader.path != file_path:
+        raise AssertionError("Path is not being normalized to POSIX standard."
+                             f"Input: {file_path}; Stored: {file_handler.file_reader.path}")
 
     fetch_bank_hierarchy_object_view(app_state, new_state)
-    create_bank_hierarchy_view(new_state)
+    create_bank_hierarchy_view(app_state, new_state)
+
+    app_state.loaded_files.add(file_path)
 
     return new_state
 
@@ -36,37 +45,46 @@ def open_archive_exist_viewer(
     - sqlite3.Error
     - Exception
     """
+    loaded_files = app_state.loaded_files
+
+    if file_path in loaded_files:
+        return
+
+    file_handler = bank_state.file_handler
+    file_reader = file_handler.file_reader
+
+    old_loaded_file_path = file_reader.path
+    if old_loaded_file_path != "" and old_loaded_file_path not in loaded_files:
+        raise AssertionError(f"File {old_loaded_file_path} is not being "
+                             "tracked in the set of loaded file.")
+
     file_handler.load_archive_file(file_path)
+    if file_handler.file_reader.path != file_path:
+        raise AssertionError("Path is not being normalized to POSIX standard."
+                             f"Input: {file_path}; Stored: {file_reader.path}")
+
+    if old_loaded_file_path != "":
+        loaded_files.remove(old_loaded_file_path)
+
     fetch_bank_hierarchy_object_view(app_state, bank_state)
-    create_bank_hierarchy_view(bank_state)
+    create_bank_hierarchy_view(app_state, bank_state)
+
+    loaded_files.add(file_path)
 
 
-def update_bank_state_window_name(
-        app_state: AppState, bank_state: BankViewerState):
-    """
-    @exception
-    - AssertionError
-    """
-    bank_id_to_window_name = app_state.bank_id_to_window_name
-    if bank_state.id not in bank_id_to_window_name:
-        raise AssertionError(f"Bank state {id} does not has an associative "
-                             "docking window.")
-    old_window_name = app_state.bank_id_to_window_name.pop(bank_state.id)
+def close_bank_state(app_state: AppState, bank_state_id: str):
+    if bank_state_id not in app_state.bank_states:
+        raise AssertionError(f"{bank_state_id} does not have an associate bank"
+                             " state.")
 
-    bank_states = app_state.bank_states
-    if old_window_name not in bank_states: 
-        raise AssertionError(f"Docking window name {old_window_name} does not has an "
-                             "associative BankViewerState")
-    app_state.bank_states.pop(old_window_name)
+    bank_state = app_state.bank_states.pop(bank_state_id)
+    file_path = bank_state.file_handler.file_reader.path
 
-    file_reader = bank_state.file_handler.file_reader
-    window_name = "Bank Viewer"
-    if hasattr(file_reader, "name"):
-        window_name = f"{file_reader.name}"
+    if file_path == "":
+        return
 
-    counter = 1
-    while window_name in app_state.bank_states:
-        window_name += f" ({counter})"
+    if file_path not in app_state.loaded_files:
+        raise AssertionError(f"File {file_path} is not being tracked in the list"
+                             " of loaded file.")
 
-    bank_states[window_name] = bank_state
-    app_state.bank_id_to_window_name[bank_state.id] = window_name
+    app_state.loaded_files.remove(file_path)
