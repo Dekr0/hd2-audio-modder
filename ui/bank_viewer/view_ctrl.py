@@ -12,11 +12,11 @@ from ui.view_data import AppState, BankViewerState, HierarchyView, MessageModalS
 """
 Below seems to be controller / agent that mitgate between the frontend and backend
 """
-def create_bank_hierarchy_view(bank_state: BankViewerState):
+def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState):
     root = bank_state.hirc_view_root
     bank_hirc_views = root.children
     bank_hirc_views_linear = bank_state.hirc_views_linear
-    hierarchy_views_banks = bank_state.hierarchy_views_banks
+    hierarchy_views_all = app_state.hierarchy_views_all
 
     bank_hirc_views.clear()
     bank_hirc_views_linear.clear()
@@ -40,10 +40,6 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
         bank_name = bank.get_name().replace("/", "_") \
                                    .replace("\x00", "")
 
-        hierarchy_views: dict[int, orm.HierarchyObjectView] = {}
-        if bank_name in hierarchy_views_banks:
-            hierarchy_views = hierarchy_views_banks[bank_name]
-
         bank_view = HierarchyView(
                 None,
                 idx, root.view_id,
@@ -62,8 +58,8 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                 segment_id = hirc_entry.get_id()
 
                 segment_label = ""
-                if segment_id in hierarchy_views:
-                    segment_label = hierarchy_views[segment_id].label
+                if segment_id in hierarchy_views_all:
+                    segment_label = hierarchy_views_all[segment_id].label
 
                 segment_view = HierarchyView(
                         hirc_entry,
@@ -82,8 +78,8 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                     track = hirc_entries[track_id]
 
                     track_label = ""
-                    if track_id in hierarchy_views:
-                        track_label = hierarchy_views[track_id].label
+                    if track_id in hierarchy_views_all:
+                        track_label = hierarchy_views_all[track_id].label
 
                     track_view = HierarchyView(
                             track,
@@ -126,8 +122,8 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                         info_id = info.get_id()
 
                         info_label = ""
-                        if info_id in hierarchy_views:
-                            info_label = hierarchy_views[info_id].label
+                        if info_id in hierarchy_views_all:
+                            info_label = hierarchy_views_all[info_id].label
 
                         info_view = HierarchyView(
                                 info,
@@ -144,8 +140,8 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                 cntr_id = hirc_entry.get_id()
 
                 cntr_label = ""
-                if cntr_id in hierarchy_views:
-                    cntr_label = hierarchy_views[cntr_id].label
+                if cntr_id in hierarchy_views_all:
+                    cntr_label = hierarchy_views_all[cntr_id].label
 
                 cntr_view = HierarchyView(
                         hirc_entry,
@@ -177,8 +173,8 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                     contained_sounds.add(entry)
 
                     sound_label = ""
-                    if entry_id in hierarchy_views:
-                        sound_label = hierarchy_views[entry_id].label
+                    if entry_id in hierarchy_views_all:
+                        sound_label = hierarchy_views_all[entry_id].label
 
                     source_view = HierarchyView(
                             audio_source,
@@ -202,8 +198,8 @@ def create_bank_hierarchy_view(bank_state: BankViewerState):
                 continue
 
             sound_label = ""
-            if hirc_entry.hierarchy_id in hierarchy_views:
-                sound_label = hierarchy_views[hirc_entry.hierarchy_id].label
+            if hirc_entry.hierarchy_id in hierarchy_views_all:
+                sound_label = hierarchy_views_all[hirc_entry.hierarchy_id].label
 
             source_view = HierarchyView(
                     audio_source,
@@ -226,7 +222,7 @@ def fetch_bank_hierarchy_object_view(app_state: AppState, bank_viewer_state: Ban
     """
     file_handler = bank_viewer_state.file_handler
     banks = file_handler.get_wwise_banks()
-    hierarchy_views_banks = bank_viewer_state.hierarchy_views_banks
+    hierarchy_views_all = app_state.hierarchy_views_all
 
     db = app_state.db
     if db == None:
@@ -237,41 +233,18 @@ def fetch_bank_hierarchy_object_view(app_state: AppState, bank_viewer_state: Ban
             continue
 
         bank_name = bank.get_name().replace("/", "_").replace("\x00", "")
-        hierarchy_object_views = db.get_hierarchy_objects_by_soundbank(bank_name, True)
+        hierarchy_object_views: list[orm.HierarchyObjectView] = \
+            db.get_hierarchy_objects_by_soundbank(bank_name, False)
 
-        hierarchy_views_banks[bank_name] = hierarchy_object_views # type: ignore
+        for hierarchy_object_view in hierarchy_object_views:
+            wwise_object_id = hierarchy_object_view.wwise_object_id
+            if wwise_object_id in hierarchy_views_all:
+                continue
+            hierarchy_views_all[wwise_object_id] = hierarchy_object_view
 
 
 def save_hierarchy_object_views_change(
-    app_state: AppState, bank_viewer_state: BankViewerState):
-    """
-    @exception
-    - NotImplementedError
-    - AssertionError
-    - sqlite3.*Error
-    """
-    db = app_state.db
-    if db == None:
-        raise NotImplementedError("Trying to save changes when database access is disabled.")
-
-    changed_hierarchy_views = bank_viewer_state.changed_hierarchy_views
-    pending_hierarchy_view_changes: dict[int, str] = {}
-    for changed_hierarchy_view in changed_hierarchy_views.values():
-        hirc_ul_ID = changed_hierarchy_view.hirc_ul_ID
-        user_defined_label = changed_hierarchy_view.user_defined_label
-        if hirc_ul_ID in pending_hierarchy_view_changes:
-            raise AssertionError("A hierarchy view queue up more than one change.")
-        pending_hierarchy_view_changes[hirc_ul_ID] = user_defined_label
-
-    db.update_hierarchy_object_labels_by_hierarchy_ids(
-        [(label, str(hirc_ul_ID)) 
-         for hirc_ul_ID, label in pending_hierarchy_view_changes.items()],
-        True,
-    )
-
-
-def save_hierarchy_object_views_change_with_modal(
-    app_state: AppState, bank_viewer_state: BankViewerState):
+    app_state: AppState, bank_state: BankViewerState):
 
     db = app_state.db
     if db == None:
@@ -280,7 +253,7 @@ def save_hierarchy_object_views_change_with_modal(
         )
         return
 
-    changed_hierarchy_views = bank_viewer_state.changed_hierarchy_views
+    changed_hierarchy_views = bank_state.changed_hierarchy_views
     pending_hierarchy_view_changes: dict[int, str] = {}
     for changed_hierarchy_view in changed_hierarchy_views.values():
         hirc_ul_ID = changed_hierarchy_view.hirc_ul_ID
@@ -297,6 +270,21 @@ def save_hierarchy_object_views_change_with_modal(
              for hirc_ul_ID, label in pending_hierarchy_view_changes.items()],
             True,
         )
+        changed_hierarchy_views.clear()
+
+        # Sync back to cached 
+        hierarchy_views_all = app_state.hierarchy_views_all
+        for hirc_ul_ID, label in pending_hierarchy_view_changes.items():
+            if hirc_ul_ID not in hierarchy_views_all:
+                raise AssertionError("Hierarchy object record with wwise object id "
+                            f"{hirc_ul_ID} is not cached from the database.")
+            hierarchy_views_all[hirc_ul_ID].label = label
+
+        bank_states = app_state.bank_states
+        for unsynced_bank_state in bank_states.values():
+            if unsynced_bank_state.id == bank_state.id:
+                continue
+            create_bank_hierarchy_view(app_state, unsynced_bank_state)
     except sqlite3.Error as err:
         app_state.warning_modals.append(MessageModalState(
             f"Failed to save changes to database. Reason: {err}")
@@ -305,11 +293,3 @@ def save_hierarchy_object_views_change_with_modal(
         if app_state.critical_modal == None:
             app_state.critical_modal = MessageModalState(
                     "Unhandle exception when saving changes to database: {err}")
-
-
-def sync_hierarchy_object_views_change(
-    app_state: AppState, bank_viewer_state: BankViewerState):
-    # Syncing (Brute force)
-    fetch_bank_hierarchy_object_view(app_state, bank_viewer_state)
-    create_bank_hierarchy_view(bank_viewer_state)
-    bank_viewer_state.changed_hierarchy_views.clear()
