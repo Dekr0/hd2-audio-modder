@@ -5,6 +5,8 @@ from collections import deque
 
 import fileutil
 
+from log import logger
+
 
 class Setting:
 
@@ -55,8 +57,14 @@ def load_setting(path: str = "setting.pickle") -> Setting:
     - pickle.PickleError
     """
     if not os.path.exists(path):
+        logger.warning("Failed to locate existing application setting. Creating "
+                       " new one...")
+
         setting = Setting()
         setting.save()
+
+        logger.info("Created brand new application setting")
+
         return setting
 
     with open(path, "rb") as f:
