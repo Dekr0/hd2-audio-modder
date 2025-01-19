@@ -1,21 +1,19 @@
 # Module import
 import os
 import posixpath
-import sqlite3
 import subprocess
 from imgui_bundle import imgui
 
 from backend.core import AudioSource
 from backend.env import get_data_path
-import fileutil
 from ui.bank_viewer.ctx_menu_ctrl import copy_audio_entry
-from ui.bank_viewer.load_archive_ctrl import open_archive_exist_viewer
+from ui.bank_viewer.load_archive_ctrl import load_archive_exist_viewer_helper
 from ui.bank_viewer.tree_selection_impl import apply_selection_reqs 
-from ui.bank_viewer.view_ctrl import save_hierarchy_object_views_change
+from ui.bank_viewer.view_ctrl import write_hirc_obj_view_change_helper
 from ui.ui_flags import * 
 from ui.ui_keys import *
 from ui.view_data import BankViewerTableHeader, BankViewerTableType
-from ui.view_data import AppState, BankViewerState, MessageModalState, HierarchyView
+from ui.view_data import AppState, BankViewerState, MsgModalState, HircView
 
 from log import logger
 
@@ -35,10 +33,8 @@ def gui_bank_viewer(
 
     ok, is_open = imgui.begin(window_name, True, imgui.WindowFlags_.menu_bar.value)
     if not is_open and archive_picker.is_schedule():
-        app_state.warning_modals.append(MessageModalState(
-            "Please close the current active file picker before closing this"
-            " bank viewer",
-            ))
+        app_state.warning_modals.append(MsgModalState(
+            "Please close the active file picker first"))
         is_open = True
 
     if not ok:
@@ -54,29 +50,16 @@ def gui_bank_viewer(
         result = archive_picker.get_result()
 
         if len(result) > 0:
-            app_state \
-                    .load_archives_queue \
-                    .append(lambda: gui_bank_viewer_load_archive(
-                        app_state, bank_state, result[0]))
+            callback = lambda: load_archive_exist_viewer_helper(app_state, 
+                                                                bank_state, 
+                                                                result[0])
+            app_state.io_task_queue.append(callback)
+
         archive_picker.reset()
 
     imgui.end()
 
     return is_open
-
-
-def gui_bank_viewer_load_archive(
-        app_state: AppState, bank_state: BankViewerState, file_path: str):
-    file_path = fileutil.to_posix(file_path)
-    try:
-        open_archive_exist_viewer(app_state, bank_state, file_path)
-        app_state.setting.update_recent_file(file_path)
-    except OSError as e:
-        # show modal or display on the logger
-        logger.error(e)
-    except sqlite3.Error as e:
-        # show modal or display on the logger
-        logger.error(e)
 
 
 def gui_bank_viewer_menu(app_state: AppState, bank_state: BankViewerState):
@@ -112,10 +95,10 @@ def gui_bank_viewer_load_archive_menu(app_state: AppState, bank_state: BankViewe
                 archive_picker.schedule("Select An Archive", get_data_path())
             except AssertionError:
                 app_state.warning_modals.append(
-                    MessageModalState("Please finish the current archive selection.")
+                    MsgModalState("Please finish the current archive selection.")
                 )
         else:
-            app_state.warning_modals.append(MessageModalState(
+            app_state.warning_modals.append(MsgModalState(
                 f"The directory path for Helldivers 2 data folder in the setting "
                 " is not correct. Please set the correct path in the Setting."
             ))
@@ -125,7 +108,7 @@ def gui_bank_viewer_load_archive_menu(app_state: AppState, bank_state: BankViewe
             archive_picker.schedule("Select An Archive")
         except AssertionError:
             app_state.warning_modals.append(
-                MessageModalState("Please finish the current archive selection.")
+                MsgModalState("Please finish the current archive selection.")
             )
 
     imgui.end_menu()
@@ -143,8 +126,11 @@ def gui_bank_viewer_load_recent_archive_menu(app_state: AppState, bank_state: Ba
 
     for recent_file in app_state.setting.recent_files:
         if imgui.menu_item_simple(recent_file):
-            app_state.load_archives_queue.append(lambda: \
-                gui_bank_viewer_load_archive(app_state, bank_state, recent_file))
+            callback = lambda: load_archive_exist_viewer_helper(app_state, 
+                                                                bank_state, 
+                                                                recent_file)
+            app_state.io_task_queue.append(callback)
+
             break
 
     imgui.end_menu()
@@ -173,16 +159,16 @@ def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
 
     bsid = bank_state.id
     imgui.push_id(bsid + "source_view")
-    if imgui.button("\ue8fe") and not bank_state.source_view:
-        bank_state.source_view = True
+    if imgui.button("\ue8fe") and not bank_state.src_view:
+        bank_state.src_view = True
         bank_state.imgui_selection_store.clear()
     imgui.pop_id()
 
     imgui.same_line()
 
     imgui.push_id(bsid + "hirc_view")
-    if imgui.button("\ue97a") and bank_state.source_view:
-        bank_state.source_view = False
+    if imgui.button("\ue97a") and bank_state.src_view:
+        bank_state.src_view = False
         bank_state.imgui_selection_store.clear()
     imgui.pop_id()
 
@@ -190,23 +176,13 @@ def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
 
     imgui.push_id(bsid + "save_label")
     if imgui.button("\ue161"):
-        try:
-            save_hierarchy_object_views_change(app_state, bank_state)
-        except NotImplementedError as err:
-            app_state.warning_modals.append(MessageModalState(str(err)))
-        except sqlite3.Error as err:
-            app_state.warning_modals.append(MessageModalState(
-                f"Failed to save labels change. Reason: {err}."
-            ))
-        except AssertionError as err:
-            if app_state.critical_modal == None:
-                app_state.critical_modal = MessageModalState(str(err))
-        except Exception as err:
-            if app_state.critical_modal == None:
-                app_state.critical_modal = MessageModalState(str(err))
+        callback = lambda: write_hirc_obj_view_change_helper(app_state, 
+                                                             bank_state)
+        app_state.io_task_queue.append(callback)
     imgui.pop_id()
 
     if not imgui.begin_table(WidgetKey.BANK_HIERARCHY_TABLE, 6, TABLE_FLAGS):
+
         return
 
     tree = bank_state.hirc_view_root
@@ -233,7 +209,7 @@ def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
     ms_io = imgui.begin_multi_select(MULTI_SELECT_FLAGS, imgui_selection_store.size, len(linear_mapping))
     apply_selection_reqs(ms_io, bank_state)
 
-    if bank_state.source_view:
+    if bank_state.src_view:
         for bank_hirc_view in bank_hirc_views:
             gui_bank_viewer_table_row_source_view(app_state, bank_state, bank_hirc_view)
     else:
@@ -247,7 +223,7 @@ def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
 
 
 def gui_bank_viewer_table_row_source_view(
-    app_state: AppState, bank_state: BankViewerState, hirc_view: HierarchyView):
+    app_state: AppState, bank_state: BankViewerState, hirc_view: HircView):
     selection: imgui.SelectionBasicStorage = bank_state.imgui_selection_store
 
     bsid = bank_state.id
@@ -375,7 +351,7 @@ def gui_bank_viewer_table_row_source_view(
         )
         if changed:
            hirc_view.user_defined_label = next
-           bank_state.changed_hierarchy_views[hirc_view.hirc_ul_ID] = hirc_view
+           bank_state.changed_hirc_views[hirc_view.hirc_ul_ID] = hirc_view
         imgui.pop_id()
         # [End]
 
@@ -394,7 +370,7 @@ def gui_bank_viewer_table_row_source_view(
 
 
 def gui_bank_viewer_table_row_hirc_view(
-        app_state: AppState, bank_state: BankViewerState, hirc_view: HierarchyView):
+        app_state: AppState, bank_state: BankViewerState, hirc_view: HircView):
     selection: imgui.SelectionBasicStorage = bank_state.imgui_selection_store
 
     bsid = bank_state.id
@@ -469,7 +445,7 @@ def gui_bank_viewer_table_row_hirc_view(
        changed, next = imgui.input_text("", hirc_view.user_defined_label)
        if changed:
            hirc_view.user_defined_label = next
-           bank_state.changed_hierarchy_views[hirc_view.hirc_ul_ID] = hirc_view
+           bank_state.changed_hirc_views[hirc_view.hirc_ul_ID] = hirc_view
        imgui.pop_id()
     else:
         imgui.text(hirc_view.user_defined_label)
@@ -490,7 +466,7 @@ def gui_bank_viewer_table_row_hirc_view(
 
 
 def gui_bank_table_item_ctx_menu(
-        hirc_view: HierarchyView, bank_state: BankViewerState):
+        hirc_view: HircView, bank_state: BankViewerState):
     if not imgui.begin_popup_context_item():
         return
     
