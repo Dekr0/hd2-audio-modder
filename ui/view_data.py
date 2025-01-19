@@ -182,14 +182,14 @@ class BankViewerState:
     """
     # source_view_root: 'HierarchyView'
     # source_views_linear: list['HierarchyView']
-    hirc_view_root: 'HierarchyView'
-    hirc_views_linear: list['HierarchyView']
+    hirc_view_root: 'HircView'
+    hirc_views_linear: list['HircView']
 
     imgui_selection_store: imgui.SelectionBasicStorage
 
-    changed_hierarchy_views: dict[int, 'HierarchyView']
+    changed_hirc_views: dict[int, 'HircView']
 
-    source_view: bool = True
+    src_view: bool = True
 
 
 @dataclass 
@@ -200,7 +200,7 @@ class CriticalModalState:
 
 
 @dataclass
-class MessageModalState:
+class MsgModalState:
 
     msg: str
     is_trigger: bool = False
@@ -241,7 +241,7 @@ class AppState:
     db: SQLiteDatabase | None
 
     # DB data
-    hierarchy_views_all: dict[int, orm.HierarchyObjectView]
+    hirc_views_all: dict[int, orm.HircObjRecord]
 
     setting: Setting
 
@@ -253,7 +253,7 @@ class AppState:
 
     # modal queue
     critical_modal: CriticalModalState | None
-    warning_modals: deque[MessageModalState]
+    warning_modals: deque[MsgModalState]
     confirm_modals: deque[ConfirmModalState]
 
     # task queue
@@ -263,7 +263,7 @@ class AppState:
 
 
 @dataclass
-class HierarchyView:
+class HircView:
     """
     view_id: int -> Row index (increment sequentially as imgui render the table )
     parent_view_id: int -> Parent row index
@@ -279,11 +279,11 @@ class HierarchyView:
     default_label: str
     hirc_entry_type: BankViewerTableType
     user_defined_label: str
-    children: list['HierarchyView']
+    children: list['HircView']
 
 
 def new_hirc_view_root():
-    return HierarchyView(
+    return HircView(
             None,
             TREE_ROOT_VIEW_ID, None, 
             -1, -1, "", 

@@ -3,13 +3,13 @@ from collections import deque
 from backend.util import copy_to_clipboard
 from backend.core import AudioSource
 
-from ui.view_data import BankViewerTableType, BankViewerState, HierarchyView
+from ui.view_data import BankViewerTableType, BankViewerState, HircView
 
 
-def unfold_selection(selects: list[HierarchyView]):
+def unfold_selection(selects: list[HircView]):
     fold_select_set: set[int] = set([select.view_id for select in selects])
     unfold_select_set: set[int] = set()
-    unfold_select_list: list[HierarchyView] = []
+    unfold_select_list: list[HircView] = []
     for select in selects:
         parent_vid = select.parent_view_id
         if parent_vid not in fold_select_set:
@@ -19,7 +19,7 @@ def unfold_selection(selects: list[HierarchyView]):
 
 
 def get_selection_binding(bank_viewer_state: BankViewerState):
-    selects: list[HierarchyView] = []
+    selects: list[HircView] = []
     imgui_selection_store = bank_viewer_state.imgui_selection_store
     hirc_views_linear = bank_viewer_state.hirc_views_linear
     selects = [hirc_view for hirc_view in hirc_views_linear 
@@ -32,14 +32,14 @@ def get_selection_binding(bank_viewer_state: BankViewerState):
 Information Copying
 """
 def copy_audio_entry(
-        hirc_view: HierarchyView,
+        hirc_view: HircView,
         bank_viewer_state: BankViewerState,
         label: bool = False):
     selects = get_selection_binding(bank_viewer_state)
     if len(selects) == 0:
         selects = [hirc_view]
     audio_source_vid_set: set[int] = set()
-    queue: deque[HierarchyView] = deque()
+    queue: deque[HircView] = deque()
     content = "" 
     for select in selects:
         if len(queue) > 0:
@@ -69,9 +69,9 @@ def copy_audio_entry(
     copy_to_clipboard(content)
 
 
-def copy_hirc_entry_unfold(hirc_view: HierarchyView, bank_viewer_state: BankViewerState):
+def copy_hirc_entry_unfold(hirc_view: HircView, bank_viewer_state: BankViewerState):
     pass
 
 
-def copy_hirc_entry_fold(hirc_view: HierarchyView, bank_viewer_state: BankViewerState):
+def copy_hirc_entry_fold(hirc_view: HircView, bank_viewer_state: BankViewerState):
     pass
