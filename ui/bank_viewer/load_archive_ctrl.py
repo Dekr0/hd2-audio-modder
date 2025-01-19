@@ -3,12 +3,12 @@ import sqlite3
 import fileutil
 
 from log import logger
-from ui.bank_viewer.view_ctrl import create_bank_hierarchy_view, fetch_bank_hierarchy_object_view
+from ui.bank_viewer.view_ctrl import create_bank_hirc_view, fetch_bank_hirc_obj_record
 from ui.view_data import AppState, BankViewerState, CriticalModalState
 from ui.view_data import new_bank_viewer_state
 
 
-def open_archive_new_viewer(app_state: AppState, file_path: str):
+def load_archive_new_viewer(app_state: AppState, file_path: str):
     """
     @description
     Use on creating a new bank viewer
@@ -29,15 +29,15 @@ def open_archive_new_viewer(app_state: AppState, file_path: str):
         raise AssertionError("Path is not being normalized to POSIX standard."
                              f"Input: {file_path}; Stored: {file_handler.file_reader.path}")
 
-    fetch_bank_hierarchy_object_view(app_state, new_state)
-    create_bank_hierarchy_view(app_state, new_state)
+    fetch_bank_hirc_obj_record(app_state, new_state)
+    create_bank_hirc_view(app_state, new_state)
 
     app_state.loaded_files.add(file_path)
 
     return new_state
 
 
-def open_archive_exist_viewer(
+def load_archive_exist_viewer(
         app_state: AppState, bank_state: BankViewerState, file_path: str):
     file_handler = bank_state.file_handler
     """
@@ -70,8 +70,8 @@ def open_archive_exist_viewer(
     if old_loaded_file_path != "":
         loaded_files.remove(old_loaded_file_path)
 
-    fetch_bank_hierarchy_object_view(app_state, bank_state)
-    create_bank_hierarchy_view(app_state, bank_state)
+    fetch_bank_hirc_obj_record(app_state, bank_state)
+    create_bank_hirc_view(app_state, bank_state)
 
     loaded_files.add(file_path)
 
@@ -98,10 +98,10 @@ def kill_bank_state(app_state: AppState, bank_state_id: str):
     app_state.loaded_files.remove(file_path)
 
 
-def open_archive_new_viewer_helper(app_state: AppState, file_path: str):
+def load_archive_new_viewer_helper(app_state: AppState, file_path: str):
     file_path = fileutil.to_posix(file_path)
     try:
-        new_state = open_archive_new_viewer(app_state, file_path)
+        new_state = load_archive_new_viewer(app_state, file_path)
 
         if new_state == None:
             return
@@ -120,12 +120,12 @@ def open_archive_new_viewer_helper(app_state: AppState, file_path: str):
         app_state.critical_modal = CriticalModalState("Assertion Error.", err)
 
 
-def open_archive_exist_viewer_helper(app_state: AppState,
+def load_archive_exist_viewer_helper(app_state: AppState,
                                      bank_state: BankViewerState, 
                                      file_path: str):
     file_path = fileutil.to_posix(file_path)
     try:
-        open_archive_exist_viewer(app_state, bank_state, file_path)
+        load_archive_exist_viewer(app_state, bank_state, file_path)
         app_state.setting.update_recent_file(file_path)
     except OSError as e:
         logger.error(e)

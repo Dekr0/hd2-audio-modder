@@ -1,23 +1,23 @@
 from imgui_bundle import imgui
 
 from ui.view_data import BankViewerTableType, TREE_ROOT_VIEW_ID
-from ui.view_data import BankViewerState, HierarchyView
+from ui.view_data import BankViewerState, HircView
 
 """
 Below implementation are directly one-to-one from ImGui Manual. ImGui does not
 have an implementation that support multi selection for tree view. This 
 implementation emulate the basic selection in Tkinter.
 """
-def tree_node_get_open(node: HierarchyView):
+def tree_node_get_open(node: HircView):
     return imgui.get_state_storage().get_bool(node.view_id)
 
 
-def tree_node_set_open(node: HierarchyView, open: bool):
+def tree_node_set_open(node: HircView, open: bool):
     return imgui.get_state_storage().set_bool(node.view_id, open)
 
 
 def tree_close_and_unselected_child_nodes(
-    node: HierarchyView,
+    node: HircView,
     selection: imgui.SelectionBasicStorage,
     depth: int
     ):
@@ -50,7 +50,7 @@ def apply_selection_reqs(
 
     linear_mapping = bank_viewer_state.hirc_views_linear
     imgui_selection_store = bank_viewer_state.imgui_selection_store
-    source_view = bank_viewer_state.source_view
+    source_view = bank_viewer_state.src_view
 
     for req in ms_io.requests:
         if req.type == imgui.SelectionRequestType.set_all:
