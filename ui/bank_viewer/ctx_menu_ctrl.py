@@ -21,7 +21,7 @@ def unfold_selection(selects: list[HircView]):
 def get_selection_binding(bank_viewer_state: BankViewerState):
     selects: list[HircView] = []
     imgui_selection_store = bank_viewer_state.imgui_selection_store
-    hirc_views_linear = bank_viewer_state.hirc_views_linear
+    hirc_views_linear = bank_viewer_state.hirc_view_list
     selects = [hirc_view for hirc_view in hirc_views_linear 
                 if imgui_selection_store.contains(hirc_view.view_id)]
 
@@ -47,7 +47,7 @@ def copy_audio_entry(
         queue.append(select)
         while len(queue) > 0:
             top = queue.popleft()
-            if top.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE:
+            if top.hirc_obj_type == BankViewerTableType.AUDIO_SOURCE:
                 if not isinstance(top.data, AudioSource):
                     raise AssertionError()
 

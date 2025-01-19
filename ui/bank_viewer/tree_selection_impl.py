@@ -48,7 +48,7 @@ def apply_selection_reqs(
         BankViewerTableType.SOUNDBANK,
     ]
 
-    linear_mapping = bank_viewer_state.hirc_views_linear
+    linear_mapping = bank_viewer_state.hirc_view_list
     imgui_selection_store = bank_viewer_state.imgui_selection_store
     source_view = bank_viewer_state.src_view
 
@@ -61,7 +61,7 @@ def apply_selection_reqs(
             if req.selected:
                 for i in range(len(linear_mapping)):
                     if source_view:
-                        if linear_mapping[i].hirc_entry_type in source_view_selectable:
+                        if linear_mapping[i].hirc_obj_type in source_view_selectable:
                             imgui_selection_store.set_item_selected(
                                 linear_mapping[i].view_id, req.selected)
                     else:
@@ -77,7 +77,7 @@ def apply_selection_reqs(
                     raise AssertionError(f"Invisible root node is inside the "
                                          "selection scheme")
                 if source_view:
-                    if linear_mapping[i].hirc_entry_type in source_view_selectable:
+                    if linear_mapping[i].hirc_obj_type in source_view_selectable:
                         imgui_selection_store.set_item_selected(
                             linear_mapping[i].view_id, req.selected)
                 else:

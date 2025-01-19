@@ -76,7 +76,7 @@ def gui_bank_viewer_load_menu(app_state: AppState, bank_state: BankViewerState):
         return
 
     gui_bank_viewer_load_archive_menu(app_state, bank_state)
-    gui_bank_viewer_load_patch_menu(app_state, bank_state)
+    gui_bank_viewer_import_menu(app_state, bank_state)
 
     imgui.end_menu()
 
@@ -114,7 +114,12 @@ def gui_bank_viewer_load_archive_menu(app_state: AppState, bank_state: BankViewe
     imgui.end_menu()
 
 
-def gui_bank_viewer_load_recent_archive_menu(app_state: AppState, bank_state: BankViewerState):
+def gui_bank_viewer_import_menu(app_state: AppState, bank_state: BankViewerState):
+    pass
+
+
+def gui_bank_viewer_load_recent_archive_menu(app_state: AppState, 
+                                             bank_state: BankViewerState):
     recent_files = app_state.setting.recent_files
 
     if len(recent_files) <= 0:
@@ -133,23 +138,6 @@ def gui_bank_viewer_load_recent_archive_menu(app_state: AppState, bank_state: Ba
 
             break
 
-    imgui.end_menu()
-
-
-def gui_bank_viewer_load_patch_menu(app_state: AppState, bank_state: BankViewerState):
-    if not imgui.begin_menu("Load"):
-        return
-
-    if imgui.begin_menu("Patch"):
-        if imgui.menu_item_simple("Load"):
-            pass
-        if imgui.begin_menu("Write"):
-            if imgui.menu_item_simple("Without Manifest"):
-                pass
-            if imgui.menu_item_simple("With Manifest"):
-                pass
-            imgui.end_menu()
-        imgui.end_menu()
     imgui.end_menu()
 
 
@@ -187,7 +175,7 @@ def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
 
     tree = bank_state.hirc_view_root
 
-    linear_mapping = bank_state.hirc_views_linear
+    linear_mapping = bank_state.hirc_view_list
     imgui_selection_store = bank_state.imgui_selection_store
 
     bank_hirc_views = tree.children
@@ -230,7 +218,7 @@ def gui_bank_viewer_table_row_source_view(
     hvid = hirc_view.view_id
     flags = TREE_NODE_FLAGS
 
-    if hirc_view.hirc_entry_type == BankViewerTableType.SOUNDBANK:
+    if hirc_view.hirc_obj_type == BankViewerTableType.SOUNDBANK:
         imgui.table_next_row()
 
         # [Column 0: Favorite]
@@ -273,7 +261,7 @@ def gui_bank_viewer_table_row_source_view(
 
         # [Column 5: Hirc. Type]
         imgui.table_next_column()
-        imgui.text(hirc_view.hirc_entry_type.value)
+        imgui.text(hirc_view.hirc_obj_type.value)
         # [End]
 
         if not expand:
@@ -285,8 +273,8 @@ def gui_bank_viewer_table_row_source_view(
         imgui.tree_pop()
 
         return
-    elif hirc_view.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE or \
-         hirc_view.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE_MUSIC:
+    elif hirc_view.hirc_obj_type == BankViewerTableType.AUDIO_SOURCE or \
+         hirc_view.hirc_obj_type == BankViewerTableType.AUDIO_SOURCE_MUSIC:
         imgui.table_next_row()
 
         # [Column 0: Favorite]
@@ -357,7 +345,7 @@ def gui_bank_viewer_table_row_source_view(
 
         # [Column 5: Hirc. Type]
         imgui.table_next_column()
-        imgui.text(hirc_view.hirc_entry_type.value)
+        imgui.text(hirc_view.hirc_obj_type.value)
         # [End]
 
         if not expand:
@@ -401,8 +389,8 @@ def gui_bank_viewer_table_row_hirc_view(
 
     # [Column 2: Play]
     imgui.table_next_column()
-    if hirc_view.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE or \
-       hirc_view.hirc_entry_type == BankViewerTableType.AUDIO_SOURCE_MUSIC:
+    if hirc_view.hirc_obj_type == BankViewerTableType.AUDIO_SOURCE or \
+       hirc_view.hirc_obj_type == BankViewerTableType.AUDIO_SOURCE_MUSIC:
         if imgui.arrow_button(f"{bsid}_play_{hvid}", imgui.Dir.right):
             audio = hirc_view.data
             if not isinstance(audio, AudioSource):
@@ -438,8 +426,8 @@ def gui_bank_viewer_table_row_hirc_view(
 
     # [Column 4: User Defined Label] I want to future proof this but I won't do it.
     imgui.table_next_column()
-    if hirc_view.hirc_entry_type.value == BankViewerTableType.AUDIO_SOURCE or \
-       hirc_view.hirc_entry_type.value == BankViewerTableType.RANDOM_SEQ_CNTR:
+    if hirc_view.hirc_obj_type.value == BankViewerTableType.AUDIO_SOURCE or \
+       hirc_view.hirc_obj_type.value == BankViewerTableType.RANDOM_SEQ_CNTR:
        imgui.push_item_width(-imgui.FLT_MIN)
        imgui.push_id(f"{bsid}_user_defined_label_{hvid}")
        changed, next = imgui.input_text("", hirc_view.user_defined_label)
@@ -453,7 +441,7 @@ def gui_bank_viewer_table_row_hirc_view(
 
     # [Column 5: Hirc. Type]
     imgui.table_next_column()
-    imgui.text(hirc_view.hirc_entry_type.value)
+    imgui.text(hirc_view.hirc_obj_type.value)
     # [End]
 
     if not expand:
