@@ -1,6 +1,10 @@
-from ui.bank_viewer.view_ctrl import create_bank_hierarchy_view, fetch_bank_hierarchy_object_view
+import sqlite3
 
-from ui.view_data import AppState, BankViewerState
+import fileutil
+
+from log import logger
+from ui.bank_viewer.view_ctrl import create_bank_hierarchy_view, fetch_bank_hierarchy_object_view
+from ui.view_data import AppState, BankViewerState, CriticalModalState
 from ui.view_data import new_bank_viewer_state
 
 
@@ -72,7 +76,11 @@ def open_archive_exist_viewer(
     loaded_files.add(file_path)
 
 
-def close_bank_state(app_state: AppState, bank_state_id: str):
+def kill_bank_state(app_state: AppState, bank_state_id: str):
+    """
+    @exception
+    - AssertionError
+    """
     if bank_state_id not in app_state.bank_states:
         raise AssertionError(f"{bank_state_id} does not have an associate bank"
                              " state.")
@@ -88,3 +96,38 @@ def close_bank_state(app_state: AppState, bank_state_id: str):
                              " of loaded file.")
 
     app_state.loaded_files.remove(file_path)
+
+
+def open_archive_new_viewer_helper(app_state: AppState, file_path: str):
+    file_path = fileutil.to_posix(file_path)
+    try:
+        new_state = open_archive_new_viewer(app_state, file_path)
+
+        if new_state == None:
+            return
+
+        bank_states = app_state.bank_states
+        if new_state.id in bank_states:
+            raise AssertionError("Bank state ID collision")
+
+        app_state.bank_states[new_state.id] = new_state
+        app_state.setting.update_recent_file(file_path)
+    except OSError as err:
+        logger.error(err)
+    except sqlite3.Error as err:
+        logger.error(err)
+    except AssertionError as err:
+        app_state.critical_modal = CriticalModalState("Assertion Error.", err)
+
+
+def open_archive_exist_viewer_helper(app_state: AppState,
+                                     bank_state: BankViewerState, 
+                                     file_path: str):
+    file_path = fileutil.to_posix(file_path)
+    try:
+        open_archive_exist_viewer(app_state, bank_state, file_path)
+        app_state.setting.update_recent_file(file_path)
+    except OSError as e:
+        logger.error(e)
+    except sqlite3.Error as e:
+        logger.error(e)
