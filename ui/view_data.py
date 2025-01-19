@@ -1,8 +1,10 @@
+import enum
+import logging
+import uuid
+
 from collections import deque
 from collections.abc import Callable
-import enum
 from typing import Any
-import uuid
 
 # Definition import
 from dataclasses import dataclass
@@ -190,6 +192,13 @@ class BankViewerState:
     source_view: bool = True
 
 
+@dataclass 
+class CriticalModalState:
+    msg: str
+    err: Exception
+    is_trigger: bool = False
+
+
 @dataclass
 class MessageModalState:
 
@@ -205,11 +214,27 @@ class ConfirmModalState:
     callback: Callable[[bool], Any] | None = None
 
 
+class CircularHandler(logging.Handler):
+    
+    def __init__(self, maxlen = 64):
+        logging.Handler.__init__(self)
+
+        self.buffer: deque[str] = deque(maxlen = maxlen)
+
+    def emit(self, record):
+        self.buffer.append(self.format(record))
+
+    def to_string(self):
+        return "\n".join(self.buffer)
+
+
 @dataclass
 class AppState:
 
     archive_picker: FilePicker
     data_folder_picker: FolderPicker
+
+    gui_log_handler: CircularHandler
 
     sound_handler: SoundHandler
 
@@ -227,13 +252,13 @@ class AppState:
     loaded_files: set[str]
 
     # modal queue
-    critical_modal: MessageModalState | None
+    critical_modal: CriticalModalState | None
     warning_modals: deque[MessageModalState]
     confirm_modals: deque[ConfirmModalState]
 
     # task queue
-    load_archives_queue: deque[Callable[..., None]]
-    closed_bank_viewer_queue: deque[str]
+    io_task_queue: deque[Callable[..., None]]
+    killed_banks: deque[str]
 # [End]
 
 
@@ -284,12 +309,13 @@ def new_app_state():
 
     return AppState(
             FilePicker(), FolderPicker(), # picker
+            CircularHandler(),
             sound_handler, # sound handler
             None, # db connection 
             {}, # db data
             Setting(), # setting
             None, None, # fonts
             {inital_state.id: inital_state}, # bank states
-            set(), # window names
+            set(), # loaded files
             None, 
             deque(), deque(), deque(), deque())
