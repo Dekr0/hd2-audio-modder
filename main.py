@@ -5,18 +5,18 @@ import sqlite3
 import shutil
 
 import setting
+import backend.env as env
 
 # Module import
 from imgui_bundle import hello_imgui, imgui
 
 from backend.db.db_access import config_sqlite_conn, SQLiteDatabase
-from backend.env import *
-from main_ctrl import main_open_archive_new_viewer
-from ui.bank_viewer.load_archive_ctrl import close_bank_state
-from ui.ui_flags import *
+from log import logger, std_formatter
+from ui.bank_viewer.load_archive_ctrl import kill_bank_state, \
+        load_archive_new_viewer_helper
 from ui.bank_viewer.draw_gui import gui_bank_viewer
-from ui.bank_viewer.view_ctrl import save_hierarchy_object_views_change
-from ui.view_data import AppState, ConfirmModalState, MessageModalState
+from ui.bank_viewer.view_ctrl import write_hirc_obj_record_changes
+from ui.view_data import AppState, ConfirmModalState, CriticalModalState, MsgModalState
 from ui.view_data import new_app_state
 
 NTHREAD = 8
@@ -26,6 +26,9 @@ def main():
     hello_imgui.set_assets_folder(".")
 
     app_state = new_app_state() 
+
+    app_state.gui_log_handler.setFormatter(std_formatter)
+    logger.addHandler(app_state.gui_log_handler)
 
     runner_params = hello_imgui.RunnerParams()
     runner_params.app_window_params.window_title = "Shovel"
@@ -66,12 +69,16 @@ def load_fonts(app_state: AppState):
     - ???
     """
 
+    logger.info("Loading application fonts...")
+
     app_state.font = hello_imgui.load_font("fonts/blex_mono_nerd_font.ttf", 18)
 
     symbol_font_params = hello_imgui.FontLoadingParams()
     symbol_font_params.merge_to_last_font = True
     symbol_font_params.glyph_ranges = [ (0xe003, 0xf8ff) ]
     app_state.symbol_font = hello_imgui.load_font("fonts/symbol_font.ttf", 18, symbol_font_params)
+
+    logger.info("Loaded application fonts")
 
 
 def show_menus(
@@ -89,18 +96,32 @@ def gui(app_state: AppState):
     """
     bank_states = app_state.bank_states
 
-    if run_critical_modal(app_state):
-        exit(1)
+    run_critical_modal(app_state)
     run_warning_modal(app_state)
     run_confirm_modal(app_state)
 
     # gui_debug_state_windows(app_state)
 
-    close_archives_queue = app_state.closed_bank_viewer_queue
+    gui_log_windows(app_state)
+
+    close_archives_queue = app_state.killed_banks
     for bank_state_id, bank_state in bank_states.items():
         is_close = gui_bank_viewer(app_state, bank_state)
         if not is_close:
             close_archives_queue.append(bank_state_id)
+
+
+def gui_log_windows(app_state: AppState):
+    ok, _ = imgui.begin("Logs")
+    if not ok:
+        imgui.end()
+
+        return
+
+    imgui.text_wrapped(app_state.gui_log_handler.to_string())
+    imgui.end()
+
+    return
 
 
 def gui_debug_state_windows(app_state: AppState):
@@ -116,7 +137,7 @@ def gui_debug_state_windows(app_state: AppState):
                 imgui.text(path)
             imgui.tree_pop()
 
-        imgui.text(f"Closed archives in queue count: {len(app_state.closed_bank_viewer_queue)}")
+        imgui.text(f"Closed archives in queue count: {len(app_state.killed_banks)}")
 
         imgui.end()
         return
@@ -146,17 +167,17 @@ def gui_archive_menu(app_state: AppState):
     gui_archive_menu_recent(app_state)
 
     if imgui.menu_item_simple("From Helldivers 2 Data Folder"):
-        if os.path.exists(get_data_path()):
+        if os.path.exists(env.get_data_path()):
             try:
-                archive_picker.schedule("Select An Archive", get_data_path(), True)
+                archive_picker.schedule("Select An Archive", env.get_data_path(), True)
             except AssertionError:
                 app_state.warning_modals.append(
-                    MessageModalState("Please finish the current archive selection.")
+                    MsgModalState("Please finish the current archive selection.")
                 )
         else:
-            app_state.warning_modals.append(MessageModalState(
-                f"The directory path for Helldivers 2 data folder in the setting "
-                " is not correct. Please set the correct path in the Setting."
+            app_state.warning_modals.append(MsgModalState(
+                "Incorrect Helldivers 2 data directory path.\n"
+                "Please set it in the \"Setting\""
             ))
 
     if imgui.menu_item_simple("From File Explorer"):
@@ -164,7 +185,7 @@ def gui_archive_menu(app_state: AppState):
             archive_picker.schedule("Select An Archive", multi=True)
         except AssertionError:
             app_state.warning_modals.append(
-                MessageModalState("Please finish the current archive selection.")
+                MsgModalState("Please finish the current archive selection.")
             )
 
 
@@ -183,7 +204,9 @@ def gui_archive_menu_recent(app_state: AppState):
 
     for recent_file in recent_files:
         if imgui.menu_item_simple(recent_file):
-            main_open_archive_new_viewer(app_state, recent_file)
+            app_state.io_task_queue \
+                    .append(lambda: load_archive_new_viewer_helper(app_state, 
+                                                                   recent_file))
             break
 
     imgui.end_menu()
@@ -200,34 +223,33 @@ def gui_setting_menu(app_state: AppState):
             data_folder_picker.schedule("Set Helldivers 2 Data Folder Directory Path")
         except AssertionError:
             app_state.warning_modals.append(
-                MessageModalState("Please finish the current selection.")
+                MsgModalState("Please finish the current selection.")
             )
 
     imgui.end_menu()
 
 
-def run_critical_modal(app_state: AppState) -> bool:
+def run_critical_modal(app_state: AppState):
     critical_modal = app_state.critical_modal
     if critical_modal == None:
-        return False
+        return
 
     if not critical_modal.is_trigger:
         imgui.open_popup("Critical")
         critical_modal.is_trigger = True
 
-    ok, _ = imgui.begin_popup_modal("Critical", flags = imgui.WindowFlags_.always_auto_resize.value)
+    ok, _ = imgui.begin_popup_modal(
+            "Critical", flags = imgui.WindowFlags_.always_auto_resize.value)
     if not ok:
-        return False
+        return
 
-    imgui.text(critical_modal.msg)
+    imgui.text(critical_modal.msg + "\nPlease check log.txt")
     if imgui.button("Exit"):
+        logger.critical(critical_modal.err)
         imgui.close_current_popup()
         imgui.end_popup()
-        return True
 
     imgui.end_popup()
-
-    return False
         
 
 def run_warning_modal(app_state: AppState):
@@ -263,7 +285,9 @@ def run_confirm_modal(app_state: AppState):
         imgui.open_popup("Required Action")
         top.is_trigger = True
 
-    ok, _ = imgui.begin_popup_modal("Required Action", flags = imgui.WindowFlags_.always_auto_resize.value)
+    ok, _ = imgui.begin_popup_modal(
+            "Required Action", 
+            flags = imgui.WindowFlags_.always_auto_resize.value)
     if not ok:
         return
 
@@ -281,10 +305,16 @@ def run_confirm_modal(app_state: AppState):
     imgui.set_item_default_focus()
 
     imgui.same_line()
-
     if imgui.button("No"):
         if callback != None:
             callback(False)
+        imgui.close_current_popup()
+        imgui.end_popup()
+        confirm_modals.popleft()
+        return
+
+    imgui.same_line()
+    if imgui.button("Cancel"):
         imgui.close_current_popup()
         imgui.end_popup()
         confirm_modals.popleft()
@@ -300,48 +330,66 @@ def run_task(app_state: AppState):
     if archive_picker.is_ready():
         results = archive_picker.get_result()
         for result in results:
-            main_open_archive_new_viewer(app_state, result)
-
+            app_state.io_task_queue \
+                     .append(lambda: load_archive_new_viewer_helper(app_state,
+                                                                    result))
         archive_picker.reset()
 
-    run_closed_bank_queue(app_state)
+    process_killed_banks(app_state)
 
-    while len(app_state.load_archives_queue) > 0:
-        app_state.load_archives_queue.popleft()()
+    while len(app_state.io_task_queue) > 0:
+        app_state.io_task_queue.popleft()()
 
     if data_folder_picker.is_ready():
         results = data_folder_picker.get_result() 
         app_state.setting.data = results
-        set_data_path(results)
+        env.set_data_path(results)
         data_folder_picker.reset()
 
 
-def run_closed_bank_queue(app_state: AppState):
+def process_killed_banks(app_state: AppState):
+    """
+    @exception
+    - AssertionError
+    """
     bank_states = app_state.bank_states
 
-    closed_bank_viewer_queue = app_state.closed_bank_viewer_queue
+    killed_banks = app_state.killed_banks
 
-    num_closed_bank = len(closed_bank_viewer_queue)
-    while len(closed_bank_viewer_queue) > 0:
-        bank_state_id = closed_bank_viewer_queue.popleft()
+    num_closed_bank = len(killed_banks)
+    while len(killed_banks) > 0:
+        bank_state_id = killed_banks.popleft()
 
         if bank_state_id not in bank_states:
-            raise AssertionError(f"{bank_state_id} does not have an associate bank"
-                                 " state.")
+            app_state.critical_modal = CriticalModalState(
+                    "Assertion Error",
+                    AssertionError(f"{bank_state_id} does not have an associate "
+                                    "bank state."))
+            return
 
         bank_state = bank_states[bank_state_id]
-        if len(bank_state.changed_hierarchy_views.items()) <= 0:
-            close_bank_state(app_state, bank_state_id)
+        if len(bank_state.changed_hirc_views.items()) <= 0:
+            kill_bank_state(app_state, bank_state_id)
             continue
 
         def callback(save: bool):
-            if save:
-                save_hierarchy_object_views_change(app_state, bank_state)
-            close_bank_state(app_state, bank_state_id)
+            try:
+                if not save:
+                    write_hirc_obj_record_changes(app_state, bank_state)
+                kill_bank_state(app_state, bank_state_id)
+            except NotImplementedError as err:
+                app_state.warning_modals.append(MsgModalState(
+                    "Database functionalities is disabled."))
+            except sqlite3.Error as err:
+                app_state.warning_modals.append(MsgModalState(
+                    "Failed to save changes\nCheck \"Log\" window"))
+                logger.error(err)
+            except AssertionError as err:
+                app_state.critical_modal = CriticalModalState("Assertion Error",
+                                                              err)
 
         app_state.confirm_modals.append(ConfirmModalState(
-            "There are unsave changes. Do you want to save before closing "
-            "this bank viewer?",
+            "There are unsave changes.\nSave before closing this bank viewer?",
             callback = callback
         ))
 
@@ -353,47 +401,61 @@ def run_closed_bank_queue(app_state: AppState):
 
 def post_init(app_state: AppState):
     try:
-        setup_app_data()
+        setup_app_storage()
     except OSError as err:
-        app_state.critical_modal = MessageModalState(
-            f"Failed to create temporary data storage location. Reason: {err}."
-            "Please report this to the developers.")
+        app_state.critical_modal = CriticalModalState(
+            "Failed to create temporary data storage location.", err)
 
     try:
+        logger.info("Loading application user setting...")
+
         app_state.setting = setting.load_setting()
-        set_data_path(app_state.setting.data)
-        if not os.path.exists(get_data_path()):
-            app_state.warning_modals.append(MessageModalState(
-                f"The directory path for Helldivers 2 data folder in the setting "
-                "is not correct. Please set that in the Setting."
+        env.set_data_path(app_state.setting.data)
+        if not os.path.exists(env.get_data_path()):
+            app_state.warning_modals.append(MsgModalState(
+                "Incorrect Helldivers 2 data directory path.\n"
+                "Please set it in the \"Setting\""
             ))
+
+        logger.info("Loaded application user setting")
     except (OSError, pickle.PickleError) as err:
         if app_state.critical_modal == None:
-            app_state.critical_modal = MessageModalState(
-                "Failed to load user setting. Try removing `setting.pickle`"
-                f" and restart. Reason: {err}."
+            app_state.critical_modal = CriticalModalState(
+                "Failed to load user setting.\n"
+                "Try removing \"setting.pickle\" and restart.",
+                err
             )
 
     try:
+        logger.info("Making local database connection...")
+
         app_state.db = SQLiteDatabase(config_sqlite_conn("database"))
+
+        logger.info("Connected to local database.")
     except sqlite3.Error as err:
-        app_state.warning_modals.append(MessageModalState(
-            f"Failed to load database. Database functionalities will be disabled. Reason: {err}"))
+        logger.error("Failed to load database. Database functionalities is disabled. Reason: {err}")
     except OSError as err:
-        app_state.warning_modals.append(MessageModalState(
-            f"Failed to locate database. Database functionalities will be disabled."
-        ))
+        logger.error("Failed to locate database. Database functionalities is disabled.")
 
 
-def setup_app_data():
+def setup_app_storage():
     """
     @exception
     - OSError
     """
-    if os.path.exists(TMP):
-        # Try-Except Block
-        shutil.rmtree(TMP)
-    os.mkdir(TMP)
+    logger.info("Setting up application storage...")
+
+    if os.path.exists(env.TMP):
+        logger.warning("Previous application session didn't clean up temporary"
+                       " storage. Removing...")
+        shutil.rmtree(env.TMP)
+        logger.warning("Removed temporary storage")
+
+    logger.info("Creating temporary storage...")
+    os.mkdir(env.TMP)
+    logger.info("Created temporary storage")
+
+    logger.info("Application storage setup completed")
 
 
 def before_exit(app_state: AppState):
