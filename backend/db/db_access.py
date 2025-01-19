@@ -58,7 +58,7 @@ class SQLiteDatabase:
         if self.conn != None:
             self.conn.commit()
 
-    def get_all_hierarchy_object_types(self) -> dict[str, str]:
+    def get_all_hirc_obj_types(self) -> dict[str, str]:
         """
         @exception
         - AssertionError
@@ -72,7 +72,7 @@ class SQLiteDatabase:
             results[row[0]] = row[1]
         return results
 
-    def get_sound_objects_by_soundbank(self, bank_name: str, as_dict: bool = False) -> dict[int, orm.SoundView] | list[orm.SoundView]:
+    def get_sound_objs_by_soundbank(self, bank_name: str, as_dict: bool = False) -> dict[int, orm.SoundView] | list[orm.SoundView]:
         """
         @exception
         - TypeError, ValueError
@@ -100,7 +100,7 @@ class SQLiteDatabase:
             return [orm.SoundView(int(row[0]), int(row[1]), row[2], row[4], set(row[3].split(","))) for row in rows]
 
     def get_hierarchy_objects_by_soundbank(self, bank_name: str, as_dict: bool = False) \
-            -> dict[int, orm.HierarchyObjectView] | list[orm.HierarchyObjectView]:
+            -> dict[int, orm.HircObjRecord] | list[orm.HircObjRecord]:
         """
         @exception
         - TypeError, ValueError
@@ -110,12 +110,12 @@ class SQLiteDatabase:
         query = "SELECT wwise_object_id, type_db_id, parent_wwise_object_id, label, tags, description FROM hierarchy_object_view WHERE soundbank_path_name = ?"
         rows = self.cursor.execute(query, (bank_name,))
         if as_dict:
-            results: dict[int, orm.HierarchyObjectView] = {}
+            results: dict[int, orm.HircObjRecord] = {}
             for row in rows:
                 wwise_object_id = int(row[0])
                 if wwise_object_id in results:
                     raise AssertionError("Field wwise_object_id UNIQUE constraint is not meet! ")
-                results[wwise_object_id] = orm.HierarchyObjectView(
+                results[wwise_object_id] = orm.HircObjRecord(
                     wwise_object_id,
                     row[1],
                     row[2],
@@ -125,9 +125,9 @@ class SQLiteDatabase:
                 )
             return results
         else:
-            return [orm.HierarchyObjectView(int(row[0]), row[1], row[2], row[3], row[4], set(row[3].split(","))) for row in rows]
+            return [orm.HircObjRecord(int(row[0]), row[1], row[2], row[3], row[4], set(row[3].split(","))) for row in rows]
 
-    def update_hierarchy_object_labels_by_hierarchy_ids(
+    def update_hirc_obj_labels_by_hirc_ids(
             self, labels: list[tuple[str, str]], commit: bool = False):
         """
         @exception

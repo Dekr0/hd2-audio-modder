@@ -27,7 +27,7 @@ class Soundbank:
         self.categories = categories
 
 
-class HierarchyObjectView:
+class HircObjRecord:
     def __init__(self,
                  wwise_object_id: int,
                  type_db_id: str,
