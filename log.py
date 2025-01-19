@@ -25,6 +25,7 @@ def get_logger():
         logger.setLevel(logging.DEBUG)
         
         file_handler = logging.FileHandler("log.txt")
+        file_handler.setFormatter(std_formatter)
         logger.addHandler(file_handler)
 
         return logger
