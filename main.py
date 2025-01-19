@@ -244,7 +244,7 @@ def run_critical_modal(app_state: AppState):
         return
 
     imgui.text(critical_modal.msg + "\nPlease check log.txt")
-    if imgui.button("Exit"):
+    if imgui.button("Exit", imgui.ImVec2(imgui.FLT_MAX, 0)):
         logger.critical(critical_modal.err)
         imgui.close_current_popup()
         imgui.end_popup()
@@ -262,12 +262,13 @@ def run_warning_modal(app_state: AppState):
         imgui.open_popup("Warning")
         top.is_trigger = True
 
-    ok, _ = imgui.begin_popup_modal("Warning", flags = imgui.WindowFlags_.always_auto_resize.value)
+    ok, _ = imgui.begin_popup_modal("Warning",
+                                    flags = imgui.WindowFlags_.always_auto_resize.value)
     if not ok:
         return
 
     imgui.text(top.msg)
-    if imgui.button("OK"):
+    if imgui.button("OK", imgui.ImVec2(-imgui.FLT_MIN, 0)):
         imgui.close_current_popup()
         imgui.end_popup()
         warning_modals.popleft()
@@ -294,7 +295,7 @@ def run_confirm_modal(app_state: AppState):
     imgui.text(top.msg)
     callback = top.callback
 
-    if imgui.button("Yes"):
+    if imgui.button("Yes", imgui.ImVec2(128.0, 0)):
         if callback != None:
             callback(True)
         imgui.close_current_popup()
@@ -305,7 +306,7 @@ def run_confirm_modal(app_state: AppState):
     imgui.set_item_default_focus()
 
     imgui.same_line()
-    if imgui.button("No"):
+    if imgui.button("No", imgui.ImVec2(128.0, 0)):
         if callback != None:
             callback(False)
         imgui.close_current_popup()
@@ -314,7 +315,7 @@ def run_confirm_modal(app_state: AppState):
         return
 
     imgui.same_line()
-    if imgui.button("Cancel"):
+    if imgui.button("Cancel", imgui.ImVec2(128.0, 0)):
         imgui.close_current_popup()
         imgui.end_popup()
         confirm_modals.popleft()
