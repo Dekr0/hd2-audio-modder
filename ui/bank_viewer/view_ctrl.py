@@ -13,6 +13,10 @@ from ui.view_data import AppState, BankViewerState, HierarchyView, MessageModalS
 Below seems to be controller / agent that mitgate between the frontend and backend
 """
 def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState):
+    """
+    @exception
+    - AssertionError
+    """
     root = bank_state.hirc_view_root
     bank_hirc_views = root.children
     bank_hirc_views_linear = bank_state.hirc_views_linear
@@ -243,15 +247,18 @@ def fetch_bank_hierarchy_object_view(app_state: AppState, bank_viewer_state: Ban
             hierarchy_views_all[wwise_object_id] = hierarchy_object_view
 
 
-def save_hierarchy_object_views_change(
-    app_state: AppState, bank_state: BankViewerState):
+def save_hierarchy_object_views_change(app_state: AppState, 
+                                       bank_state: BankViewerState):
+    """
+    @exception
+    - AssertionError
+    - NotImplementedError
+    - sqlite3.Error
+    """
 
     db = app_state.db
     if db == None:
-        app_state.warning_modals.append(MessageModalState(
-            "Trying to save changes when database access is disabled.")
-        )
-        return
+        raise NotImplementedError()
 
     changed_hierarchy_views = bank_state.changed_hierarchy_views
     pending_hierarchy_view_changes: dict[int, str] = {}
@@ -259,37 +266,27 @@ def save_hierarchy_object_views_change(
         hirc_ul_ID = changed_hierarchy_view.hirc_ul_ID
         user_defined_label = changed_hierarchy_view.user_defined_label
         if hirc_ul_ID in pending_hierarchy_view_changes:
-            if app_state.critical_modal == None:
-                app_state.critical_modal = MessageModalState(
-                    "A hierarchy view queue up more than one change.")
+            raise AssertionError("A hierarchy view queue up more than one change.")
         pending_hierarchy_view_changes[hirc_ul_ID] = user_defined_label
 
-    try:
-        db.update_hierarchy_object_labels_by_hierarchy_ids(
-            [(label, str(hirc_ul_ID)) 
-             for hirc_ul_ID, label in pending_hierarchy_view_changes.items()],
-            True,
-        )
-        changed_hierarchy_views.clear()
+    db.update_hierarchy_object_labels_by_hierarchy_ids(
+        [(label, str(hirc_ul_ID)) 
+         for hirc_ul_ID, label in pending_hierarchy_view_changes.items()],
+        True,
+    )
+    changed_hierarchy_views.clear()
 
-        # Sync back to cached 
-        hierarchy_views_all = app_state.hierarchy_views_all
-        for hirc_ul_ID, label in pending_hierarchy_view_changes.items():
-            if hirc_ul_ID not in hierarchy_views_all:
-                raise AssertionError("Hierarchy object record with wwise object id "
-                            f"{hirc_ul_ID} is not cached from the database.")
-            hierarchy_views_all[hirc_ul_ID].label = label
+    # Sync back to cached 
+    hierarchy_views_all = app_state.hierarchy_views_all
+    for hirc_ul_ID, label in pending_hierarchy_view_changes.items():
+        if hirc_ul_ID not in hierarchy_views_all:
+            raise AssertionError(
+                   f"Hierarchy object record with wwise object id {hirc_ul_ID}"
+                    " is not cached from the database.")
+        hierarchy_views_all[hirc_ul_ID].label = label
 
-        bank_states = app_state.bank_states
-        for unsynced_bank_state in bank_states.values():
-            if unsynced_bank_state.id == bank_state.id:
-                continue
-            create_bank_hierarchy_view(app_state, unsynced_bank_state)
-    except sqlite3.Error as err:
-        app_state.warning_modals.append(MessageModalState(
-            f"Failed to save changes to database. Reason: {err}")
-        )
-    except Exception as err:
-        if app_state.critical_modal == None:
-            app_state.critical_modal = MessageModalState(
-                    "Unhandle exception when saving changes to database: {err}")
+    bank_states = app_state.bank_states
+    for unsynced_bank_state in bank_states.values():
+        if unsynced_bank_state.id == bank_state.id:
+            continue
+        create_bank_hierarchy_view(app_state, unsynced_bank_state)
