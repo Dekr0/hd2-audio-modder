@@ -2,17 +2,19 @@ import sqlite3
 
 import backend.db.db_schema_map as orm
 
+from log import logger
 from backend.core import MusicSegment, RandomSequenceContainer, Sound
 from backend.const import VORBIS
 
 from ui.view_data import BankViewerTableType
-from ui.view_data import AppState, BankViewerState, HierarchyView, MessageModalState
+from ui.view_data import AppState, BankViewerState, HircView
+from ui.view_data import CriticalModalState, MsgModalState
 
 
 """
 Below seems to be controller / agent that mitgate between the frontend and backend
 """
-def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState):
+def create_bank_hirc_view(app_state: AppState, bank_state: BankViewerState):
     """
     @exception
     - AssertionError
@@ -20,7 +22,7 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
     root = bank_state.hirc_view_root
     bank_hirc_views = root.children
     bank_hirc_views_linear = bank_state.hirc_views_linear
-    hierarchy_views_all = app_state.hierarchy_views_all
+    hirc_views_all = app_state.hirc_views_all
 
     bank_hirc_views.clear()
     bank_hirc_views_linear.clear()
@@ -44,7 +46,7 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
         bank_name = bank.get_name().replace("/", "_") \
                                    .replace("\x00", "")
 
-        bank_view = HierarchyView(
+        bank_view = HircView(
                 None,
                 idx, root.view_id,
                 bank.get_id(), -1, bank_name,
@@ -62,10 +64,10 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
                 segment_id = hirc_entry.get_id()
 
                 segment_label = ""
-                if segment_id in hierarchy_views_all:
-                    segment_label = hierarchy_views_all[segment_id].label
+                if segment_id in hirc_views_all:
+                    segment_label = hirc_views_all[segment_id].label
 
-                segment_view = HierarchyView(
+                segment_view = HircView(
                         hirc_entry,
                         idx, bank_idx,
                         segment_id, -1,
@@ -82,10 +84,10 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
                     track = hirc_entries[track_id]
 
                     track_label = ""
-                    if track_id in hierarchy_views_all:
-                        track_label = hierarchy_views_all[track_id].label
+                    if track_id in hirc_views_all:
+                        track_label = hirc_views_all[track_id].label
 
-                    track_view = HierarchyView(
+                    track_view = HircView(
                             track,
                             idx, segment_view_id, 
                             track_id, -1,
@@ -107,7 +109,7 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
                             # Logging?
                             continue
 
-                        source_view = HierarchyView(
+                        source_view = HircView(
                                 audio_source,
                                 idx, track_view_id,
                                 track_id, source_id,
@@ -126,10 +128,10 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
                         info_id = info.get_id()
 
                         info_label = ""
-                        if info_id in hierarchy_views_all:
-                            info_label = hierarchy_views_all[info_id].label
+                        if info_id in hirc_views_all:
+                            info_label = hirc_views_all[info_id].label
 
-                        info_view = HierarchyView(
+                        info_view = HircView(
                                 info,
                                 idx, track_view_id,
                                 info_id, -1, 
@@ -144,10 +146,10 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
                 cntr_id = hirc_entry.get_id()
 
                 cntr_label = ""
-                if cntr_id in hierarchy_views_all:
-                    cntr_label = hierarchy_views_all[cntr_id].label
+                if cntr_id in hirc_views_all:
+                    cntr_label = hirc_views_all[cntr_id].label
 
-                cntr_view = HierarchyView(
+                cntr_view = HircView(
                         hirc_entry,
                         idx, bank_idx,
                         cntr_id, -1,
@@ -177,10 +179,10 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
                     contained_sounds.add(entry)
 
                     sound_label = ""
-                    if entry_id in hierarchy_views_all:
-                        sound_label = hierarchy_views_all[entry_id].label
+                    if entry_id in hirc_views_all:
+                        sound_label = hirc_views_all[entry_id].label
 
-                    source_view = HierarchyView(
+                    source_view = HircView(
                             audio_source,
                             idx, cntr_view_id,
                             entry.hierarchy_id, source_id,
@@ -202,10 +204,10 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
                 continue
 
             sound_label = ""
-            if hirc_entry.hierarchy_id in hierarchy_views_all:
-                sound_label = hierarchy_views_all[hirc_entry.hierarchy_id].label
+            if hirc_entry.hierarchy_id in hirc_views_all:
+                sound_label = hirc_views_all[hirc_entry.hierarchy_id].label
 
-            source_view = HierarchyView(
+            source_view = HircView(
                     audio_source,
                     idx, bank_idx,
                     hirc_entry.hierarchy_id, source_id, 
@@ -218,7 +220,7 @@ def create_bank_hierarchy_view(app_state: AppState, bank_state: BankViewerState)
             idx += 1
 
 
-def fetch_bank_hierarchy_object_view(app_state: AppState, bank_viewer_state: BankViewerState):
+def fetch_bank_hirc_obj_record(app_state: AppState, bank_viewer_state: BankViewerState):
     """
     @exception
     - AssertionError
@@ -226,7 +228,7 @@ def fetch_bank_hierarchy_object_view(app_state: AppState, bank_viewer_state: Ban
     """
     file_handler = bank_viewer_state.file_handler
     banks = file_handler.get_wwise_banks()
-    hierarchy_views_all = app_state.hierarchy_views_all
+    hierarchy_views_all = app_state.hirc_views_all
 
     db = app_state.db
     if db == None:
@@ -237,7 +239,7 @@ def fetch_bank_hierarchy_object_view(app_state: AppState, bank_viewer_state: Ban
             continue
 
         bank_name = bank.get_name().replace("/", "_").replace("\x00", "")
-        hierarchy_object_views: list[orm.HierarchyObjectView] = \
+        hierarchy_object_views: list[orm.HircObjRecord] = \
             db.get_hierarchy_objects_by_soundbank(bank_name, False)
 
         for hierarchy_object_view in hierarchy_object_views:
@@ -247,7 +249,7 @@ def fetch_bank_hierarchy_object_view(app_state: AppState, bank_viewer_state: Ban
             hierarchy_views_all[wwise_object_id] = hierarchy_object_view
 
 
-def save_hierarchy_object_views_change(app_state: AppState, 
+def write_hirc_obj_record_changes(app_state: AppState, 
                                        bank_state: BankViewerState):
     """
     @exception
@@ -260,7 +262,7 @@ def save_hierarchy_object_views_change(app_state: AppState,
     if db == None:
         raise NotImplementedError()
 
-    changed_hierarchy_views = bank_state.changed_hierarchy_views
+    changed_hierarchy_views = bank_state.changed_hirc_views
     pending_hierarchy_view_changes: dict[int, str] = {}
     for changed_hierarchy_view in changed_hierarchy_views.values():
         hirc_ul_ID = changed_hierarchy_view.hirc_ul_ID
@@ -269,7 +271,7 @@ def save_hierarchy_object_views_change(app_state: AppState,
             raise AssertionError("A hierarchy view queue up more than one change.")
         pending_hierarchy_view_changes[hirc_ul_ID] = user_defined_label
 
-    db.update_hierarchy_object_labels_by_hierarchy_ids(
+    db.update_hirc_obj_labels_by_hirc_ids(
         [(label, str(hirc_ul_ID)) 
          for hirc_ul_ID, label in pending_hierarchy_view_changes.items()],
         True,
@@ -277,7 +279,7 @@ def save_hierarchy_object_views_change(app_state: AppState,
     changed_hierarchy_views.clear()
 
     # Sync back to cached 
-    hierarchy_views_all = app_state.hierarchy_views_all
+    hierarchy_views_all = app_state.hirc_views_all
     for hirc_ul_ID, label in pending_hierarchy_view_changes.items():
         if hirc_ul_ID not in hierarchy_views_all:
             raise AssertionError(
@@ -289,4 +291,19 @@ def save_hierarchy_object_views_change(app_state: AppState,
     for unsynced_bank_state in bank_states.values():
         if unsynced_bank_state.id == bank_state.id:
             continue
-        create_bank_hierarchy_view(app_state, unsynced_bank_state)
+        create_bank_hirc_view(app_state, unsynced_bank_state)
+
+
+def write_hirc_obj_view_change_helper(app_state: AppState, 
+                                  bank_state: BankViewerState):
+    try:
+        write_hirc_obj_record_changes(app_state, bank_state)
+    except NotImplementedError as err:
+        app_state.warning_modals.append(MsgModalState(
+            "Database functionalities is disabled."))
+    except sqlite3.Error as err:
+        app_state.warning_modals.append(MsgModalState(
+            "Failed to save changes\nCheck \"Log\" window"))
+        logger.error(err)
+    except AssertionError as err:
+        app_state.critical_modal = CriticalModalState("Assertion Error", err)
