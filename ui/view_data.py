@@ -33,15 +33,8 @@ Wwise Stream.
 
 View Data Class is meant to use for presenting information in the UI.
 
-There is only single source of truth. The unerlying data for Wwise Bank and 
-Wwise Stream stored in FileReader class
-
-Users perform input change, input change reflect into source of truth. The UI 
-immedately reflect the change by render the UI entirely.
-
 Since it's using ImGUI, we should rework the backend to accurately encapsulate 
-the hierarchy of the Soundbank because so that we can directly pump data into 
-the UI. 
+the hierarchy of the Soundbank so that we can directly pump data into the UI. 
 
 The main pain point right now is that each node does not know its parent. Thus, 
 this make some implementation harder to do because there are more work around 
@@ -180,10 +173,8 @@ class BankViewerState:
         - quick access on node in terms of query node when handling selection 
         for tree structure
     """
-    # source_view_root: 'HierarchyView'
-    # source_views_linear: list['HierarchyView']
     hirc_view_root: 'HircView'
-    hirc_views_linear: list['HircView']
+    hirc_view_list: list['HircView']
 
     imgui_selection_store: imgui.SelectionBasicStorage
 
@@ -241,7 +232,7 @@ class AppState:
     db: SQLiteDatabase | None
 
     # DB data
-    hirc_views_all: dict[int, orm.HircObjRecord]
+    hirc_records: dict[int, orm.HircObjRecord]
 
     setting: Setting
 
@@ -257,7 +248,7 @@ class AppState:
     confirm_modals: deque[ConfirmModalState]
 
     # task queue
-    io_task_queue: deque[Callable[..., None]]
+    io_tasks_queue: deque[Callable[..., None]]
     killed_banks: deque[str]
 # [End]
 
@@ -274,31 +265,36 @@ class HircView:
 
     view_id: int
     parent_view_id: int | None
-    hirc_ul_ID: int
-    source_id: int
+    hirc_ul_ID: int # For Hirc. object 
     default_label: str
-    hirc_entry_type: BankViewerTableType
+    hirc_obj_type: BankViewerTableType
     user_defined_label: str
     children: list['HircView']
+    modified: bool = False
 
 
 def new_hirc_view_root():
     return HircView(
-            None,
-            TREE_ROOT_VIEW_ID, None, 
-            -1, -1, "", 
-            BankViewerTableType.ROOT, "", [])
+            data = None,
+            view_id = TREE_ROOT_VIEW_ID, 
+            parent_view_id = None, 
+            hirc_ul_ID = -1, 
+            default_label = "", 
+            hirc_obj_type = BankViewerTableType.ROOT, 
+            user_defined_label = "", 
+            children = [])
 
 
 def new_bank_viewer_state(sound_handler: SoundHandler):
     return BankViewerState(
-            uuid.uuid4().hex, # id
-            FileHandler(), # backend
-            FilePicker(),
-            sound_handler,
-            new_hirc_view_root(), [], # hirc. view
-            imgui.SelectionBasicStorage(),  # selection storage
-            {}, # DB change bus
+            id = uuid.uuid4().hex, # id
+            file_handler = FileHandler(), # backend
+            archive_picker = FilePicker(),
+            sound_handler = sound_handler,
+            hirc_view_root = new_hirc_view_root(), 
+            hirc_view_list = [],
+            imgui_selection_store = imgui.SelectionBasicStorage(),  # selection storage
+            changed_hirc_views = {}, # DB change bus
         )
 
 
@@ -308,14 +304,19 @@ def new_app_state():
     inital_state = new_bank_viewer_state(sound_handler)
 
     return AppState(
-            FilePicker(), FolderPicker(), # picker
-            CircularHandler(),
-            sound_handler, # sound handler
-            None, # db connection 
-            {}, # db data
-            Setting(), # setting
-            None, None, # fonts
-            {inital_state.id: inital_state}, # bank states
-            set(), # loaded files
-            None, 
-            deque(), deque(), deque(), deque())
+            archive_picker = FilePicker(),
+            data_folder_picker = FolderPicker(), # picker
+            gui_log_handler = CircularHandler(),
+            sound_handler = sound_handler, # sound handler
+            db = None, # db connection 
+            hirc_records = {}, # db data
+            setting = Setting(), # setting
+            font = None,
+            symbol_font = None, # fonts
+            bank_states = {inital_state.id: inital_state}, # bank states
+            loaded_files = set(), # loaded files
+            critical_modal = None,
+            warning_modals = deque(),
+            confirm_modals = deque(),
+            io_tasks_queue = deque(),
+            killed_banks = deque())
