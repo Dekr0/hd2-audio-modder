@@ -1,42 +1,39 @@
 import sqlite3
 import os
+import time
 
 from typing import Callable
 
 import backend.db.db_schema_map as orm
 
 
-"""
-Singleton database connection initializer within the lifetime of an application
-
-Exception will happen.
-"""
 def config_sqlite_conn(db_path: str):
-    conn: sqlite3.Connection | None = None
+    """
+    @exception
+    - OSError
+    """
+    if not os.path.exists(db_path):
+        raise OSError(f"Database {db_path} does not exists.")
 
     def _get_sqlite_conn() -> sqlite3.Connection | None:
-        nonlocal conn
-        if conn != None:
-            return conn
-
-        if not os.path.exists(db_path):
-            raise OSError(f"Database {db_path} does not exists.")
-
+        """
+        @exception
+        - sqlite3.Error
+        """
         conn = sqlite3.connect(db_path)
         return conn
 
     return _get_sqlite_conn
 
-"""
-All database access method will raise exception.
-"""
+
 class SQLiteDatabase:
 
     def __init__(self, 
                  initializer: Callable[[], sqlite3.Connection | None]):
         """
         @exception
-        - Any
+        - RuntimeError
+        - sqlite3.Error
         """
         self.conn = initializer()
         if self.conn != None:
@@ -99,7 +96,7 @@ class SQLiteDatabase:
         else:
             return [orm.SoundView(int(row[0]), int(row[1]), row[2], row[4], set(row[3].split(","))) for row in rows]
 
-    def get_hierarchy_objects_by_soundbank(self, bank_name: str, as_dict: bool = False) \
+    def get_hirc_objs_by_soundbank(self, bank_name: str, as_dict: bool = False) \
             -> dict[int, orm.HircObjRecord] | list[orm.HircObjRecord]:
         """
         @exception
@@ -135,6 +132,7 @@ class SQLiteDatabase:
         - AssertionError
         - sqlite3.*Error
         """
+        time.sleep(10)
         query = f"UPDATE hierarchy_object SET label = ? WHERE wwise_object_id = ?"
         self.cursor.executemany(query, labels)
         commit and self.commit()
