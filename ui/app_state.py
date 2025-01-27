@@ -1,23 +1,24 @@
-import gc
 import logging
+import os
 import sqlite3
+import time
 
 from collections import deque
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Iterable
 
 from dataclasses import dataclass
 
 from imgui_bundle import imgui
 
-import backend.db.db_schema_map as orm
-
-from backend.core import SoundHandler
+from backend.db.db_schema_map import HircObjRecord
+from backend.core import GameArchive, Mod, ModHandler, SoundHandler
 from backend.db.db_access import SQLiteDatabase
 from log import logger, std_formatter
 from setting import Setting
+from ui.bank_viewer.state import BankViewerState, ModViewerState
 from ui.event_loop import EventLoop
-from ui.bank_viewer.state import BankViewerState
+from ui.task_def import Action, ThreadAction
 
 
 @dataclass 
@@ -80,7 +81,7 @@ class ModalLoop:
             return
 
         imgui.text(top.msg + "\nPlease check log.txt")
-        if imgui.button("Exit", imgui.ImVec2(imgui.FLT_MAX, 0)):
+        if imgui.button("Exit", imgui.ImVec2(-imgui.FLT_MIN, 0)):
             logger.critical(top.err)
             imgui.close_current_popup()
             imgui.end_popup()
@@ -170,32 +171,46 @@ class ModalLoop:
     ):
         self.confirm_modals.append(ConfirmModalState(msg, callback))
 
+    def __str__(self):
+        status = f"\t# of critical modal: {len(self.critical_modal)}"
+        status += f"\n\t# of warning modal: {len(self.warning_modals)}"
+        status += f"\n\t# of confirm modal: {len(self.confirm_modals)}"
+        return status
+
 
 class AppState:
 
-    def __init__(self):
+    def __init__(self, frame_rate: float = 1 / 60.0 * 1_0_0000_0000):
         self.gui_log_handler = CircularHandler()
         self.gui_log_handler.setFormatter(std_formatter)
         logger.addHandler(self.gui_log_handler)
 
+        ModHandler.create_instance()
+        self.mod_handler = ModHandler.get_instance()
         self.sound_handler = SoundHandler()
 
         self.db_conn_config: Callable[..., 
                                       sqlite3.Connection | None] | None = None
 
-        self.hirc_records: dict[int, orm.HircObjRecord] = {}
+        self.hirc_records: dict[int, HircObjRecord] = {}
 
         self.setting: Setting = Setting()
 
         self.font: imgui.ImFont | None = None
         self.symbol_font: imgui.ImFont | None = None
 
-        self.bank_states: dict[str, BankViewerState] = {}
+        self.mod_counter: int = 0 # never decrease, used for mod initialization
+        self.mod_states: dict[str, ModViewerState] = {}
         self.gc_banks: deque[str] = deque()
-        self.loaded_files: set[str] = set()
 
         self.modal_loop = ModalLoop()
         self.logic_loop = EventLoop()
+
+        self.frame_rate = int(frame_rate)
+        self.prev_timer = 0
+
+    def start_timer(self):
+        self.prev_timer = time.perf_counter_ns()
 
     def get_symbol_font(self):
         if self.symbol_font == None:
@@ -210,9 +225,6 @@ class AppState:
     def is_db_enabled(self):
         return self.db_conn_config != None
 
-    def is_db_write_busy(self):
-        return self.logic_loop.is_db_write_busy()
-
     def new_db_conn(self):
         if self.db_conn_config == None:
             raise AssertionError(
@@ -221,10 +233,14 @@ class AppState:
 
         return SQLiteDatabase(self.db_conn_config)
 
-    def has_issue_db_write(self, bank_state: BankViewerState):
-        return self.logic_loop.has_issue_db_write(bank_state)
-
-    def write_hirc_obj_records(self, bank_state: BankViewerState):
+    def write_hirc_obj_records(
+        self,
+        bank_state: BankViewerState,
+        on_write_cancel: Callable[..., None] | None = None,
+        on_write_error: Callable[[BaseException], None] | None = None,
+        on_write_done_cancel: Callable[..., None] | None = None,
+        on_write_done_error: Callable[[Exception | None], None] | None = None,
+    ):
         """
         @exception
         - AssertionError
@@ -251,7 +267,13 @@ class AppState:
                 raise AssertionError("A hierarchy view cause more than one mutation.")
             muts[hirc_ul_ID] = usr_defined_label
 
-        def on_finished():
+        def task():
+            self.new_db_conn().update_hirc_obj_labels_by_hirc_ids(
+                [(label, str(hirc_ul_ID)) for hirc_ul_ID, label in muts.items()],
+                True
+            )
+
+        def on_write_done():
             bank_state.mut_hirc_views.clear()
 
             for hirc_ul_ID, usr_defined_label in muts.items():
@@ -265,130 +287,357 @@ class AppState:
             for unsync in self.bank_states.values():
                 if unsync.id == bank_state.id:
                     continue
-                bank_state.create_bank_hirc_view(self.hirc_records)
 
-        
-        self.logic_loop.queue_db_write_task(
-            bank_state,
-            lambda: self.new_db_conn() \
-                    .update_hirc_obj_labels_by_hirc_ids(
-                        [
-                            (label, str(hirc_ul_ID))
-                            for hirc_ul_ID, label in muts.items()
-                        ],
-                        True
-                    ),
-            on_finished
+                view_creation_task = Action[BankViewerState, None](
+                    bank_state,
+                    lambda _: bank_state.create_bank_hirc_view(self.hirc_records),
+                    on_cancel = on_write_done_cancel,
+                    on_reject = on_write_done_error,
+                )
+
+                self.logic_loop.queue_micro_action(view_creation_task)
+
+        write_done_task = Action[BankViewerState, None](
+            bank_state, 
+            on_write_done,
+            on_cancel = on_write_done_cancel,
+            on_reject = on_write_done_error
         )
 
-    def fetch_bank_hirc_obj_record(self, bank_state: BankViewerState):
+        db_task = self.logic_loop.queue_db_write_action(
+            bank_state, 
+            task, 
+            on_cancel = on_write_cancel,
+            on_result = write_done_task,
+            on_reject = on_write_error 
+        )
+
+        return write_done_task, db_task
+
+    def fetch_bank_hirc_obj_record[I](
+        self,
+        actor: I,
+        bank_names: list[str], 
+        on_cancel: Callable[..., None] | None = None,
+        on_hirc_record_update_done_action: Action[I, Any] | None = None,
+        on_reject: Callable[[BaseException | None], None] | None = None
+    ):
         """
+        @description
+        - Schedule a database query for hierarchy object record using file names 
+        of sound banks, and cache in the received record in memory.
+
+        @params
+        - on_hirc_record_update_done_action - a micro action that can be scheduled
+         after a database query is finished and its record is cached in memory.
+
         @exception
         - AssertionError
         - sqlite3.Error
         """
-        file_handler = bank_state.file_handler
-        banks = file_handler.get_wwise_banks()
-
         if self.db_conn_config == None:
             return
 
-        conn = self.new_db_conn()
+        def fetch(_) -> list[HircObjRecord]:
+            conn = self.new_db_conn()
+            records: list[HircObjRecord] = conn.get_hirc_objs_by_soundbank(bank_names, False)
+            conn.close()
 
-        for bank in banks.values():
-            if bank.hierarchy == None:
-                continue
+            return records
 
-            bank_name = bank.get_name().replace("/", "_").replace("\x00", "")
-            hirc_obj_views: list[orm.HircObjRecord] = \
-                    conn.get_hirc_objs_by_soundbank(bank_name, False)
-
-            for hirc_obj_view in hirc_obj_views:
-                wwise_object_id = hirc_obj_view.wwise_object_id
+        def on_fetch_done(records: list[HircObjRecord]):
+            for record in records:
+                wwise_object_id = record.wwise_object_id
                 if wwise_object_id in self.hirc_records:
                     continue
-                self.hirc_records[wwise_object_id] = hirc_obj_view
+                self.hirc_records[wwise_object_id] = record
 
-    def load_archive_new_viewer(self, file_path: str):
-        """
-        @description
-        Use on creating a new bank viewer
+        fetch_action = Action[I, list[HircObjRecord]](
+            actor, fetch, on_cancel = on_cancel, on_reject = on_reject
+        )
+        on_fetch_done_action = Action[I, None](
+            actor, on_fetch_done,
+            on_cancel = on_cancel, 
+            on_result = on_hirc_record_update_done_action,
+            on_reject = on_reject
+        )
+        fetch_action.on_result = on_fetch_done_action
 
-        @exception
-        - OSError
-        - AssertionError
-        """
-        if file_path in self.loaded_files:
-            return None
+        self.logic_loop.queue_micro_action(fetch_action)
 
-        new_state = BankViewerState(self.sound_handler) 
+    def create_blank_mod(self):
+        new_mod_name = f"mod_{self.mod_counter}"
+        if self.mod_handler.has_mod(new_mod_name):
+            self.mod_counter += 1
+            new_mod_name = f"mod_{self.mod_counter}"
+            while self.mod_handler.has_mod(new_mod_name):
+                self.mod_counter += 1
+                new_mod_name = f"mod_{self.mod_counter}"
 
-        file_handler = new_state.file_handler
-        file_handler.load_archive_file(file_path)
-        loaded_path = file_handler.file_reader.path
-        if loaded_path != file_path:
-            raise AssertionError("Path is not being normalized to POSIX standard."
-                                f"Input: {file_path}; Stored: {loaded_path}")
+        new_mod = self.mod_handler.create_new_mod(new_mod_name)
+        self.mod_states[new_mod.name] = ModViewerState(
+            new_mod, BankViewerState(new_mod.get_wwise_banks())
+        )
 
-        try:
-            self.fetch_bank_hirc_obj_record(new_state)
-        except (sqlite3.Error, OSError) as err:
-            logger.error(err)
-
-        new_state.create_bank_hirc_view(self.hirc_records)
-
-        self.loaded_files.add(file_path)
-
-        self.bank_states[new_state.id] = new_state
-        self.setting.update_recent_file(file_path)
-
-    def load_archive_exist_viewer(
-        self, 
-        bank_state: BankViewerState, 
-        file_path: str
+    def load_archives_as_single_new_mod(
+        self,
+        file_paths: list[str],
+        on_cancel: Callable[..., None] | None = None,
+        on_reject: Callable[[BaseException | None], None] | None = None
     ):
         """
         @description
-        Use on existing bank viewer.
+        - Given some file paths of game archives, open them and encapsulate as 
+        instances of GameArchive, store them in a new instance of Mod, and 
+        create view model of this new instance of Mod
+
+        @exception
+        --
+        """
+        def load_archive(file_path):
+            return GameArchive.from_file(file_path)
+
+        def on_load_archives_done(new_game_archives: Iterable[GameArchive]):
+            new_mod_name = f"mod_{self.mod_counter}"
+            if self.mod_handler.has_mod(new_mod_name):
+                self.mod_counter += 1
+                new_mod_name = f"mod_{self.mod_counter}"
+                while self.mod_handler.has_mod(new_mod_name):
+                    self.mod_counter += 1
+                    new_mod_name = f"mod_{self.mod_counter}"
+
+            try:
+                new_mod = self.mod_handler.create_new_mod(new_mod_name)
+                self.mod_states[new_mod.name] = ModViewerState(
+                    new_mod, BankViewerState(new_mod.get_wwise_banks())
+                )
+
+                def add_game_archive_task(game_archive: GameArchive):
+                    new_mod.add_game_archive(game_archive)
+
+                for new_game_archive in new_game_archives:
+                    add_game_archive_action = Action[ModViewerState, None](
+                        self.mod_states[new_mod.name], add_game_archive_task,
+                        on_cancel = on_cancel, on_reject = on_reject,
+                        prev_result = new_game_archive
+                    )
+
+                    self.logic_loop.queue_micro_action(add_game_archive_action)
+
+                def on_add_game_archives_done(_):
+                    bank_names: list[str] = [
+                        bank.get_name().replace("/", "_").replace("\x00", "")
+                        for bank in new_mod.get_wwise_banks().values()
+                        if bank.hierarchy != None
+                    ]
+
+                    def on_hirc_record_update_done(_):
+                        self.mod_states[new_mod.name] \
+                            .bank_state.create_bank_hirc_view(new_mod, self.hirc_records)
+
+                    on_hirc_record_update_done_action = Action[ModViewerState, None](
+                        self.mod_states[new_mod.name], on_hirc_record_update_done, 
+                        on_cancel = on_cancel, on_reject = on_reject
+                    )
+
+                    self.fetch_bank_hirc_obj_record(
+                        self.mod_states[new_mod.name], bank_names,
+                        on_cancel, on_hirc_record_update_done_action, on_reject
+                    )
+
+                on_add_game_archives_done_action = Action[ModViewerState, None](
+                    self.mod_states[new_mod.name], on_add_game_archives_done,
+                    on_cancel = on_cancel, on_reject = on_reject
+                )
+
+                self.logic_loop.queue_micro_action(on_add_game_archives_done_action)
+            except KeyError:
+                raise AssertionError(
+                    "No name conflict on mod handle but name conflict on viewer"
+                    " state."
+                )
+
+        on_load_archives_done_action = Action[AppState, None](
+            self, on_load_archives_done,
+            on_cancel = on_cancel,
+            on_reject = on_reject
+        )
+
+        return self.logic_loop.queue_thread_reduce_action(
+            self, load_archive, file_paths, 
+            on_cancel = on_cancel, 
+            on_result = on_load_archives_done_action,
+            on_reject = on_reject,
+        )
+        
+
+    def load_archive_as_separate_new_mods(
+        self, 
+        file_paths: list[str],
+        on_cancel: Callable[..., None] | None = None,
+        on_reject: Callable[[BaseException | Exception | None], None] | None = None
+    ):
+        """
+        @description
+        - Give some file paths of game archives, for each game archive, open it 
+        as an new instance of Mod.
+
+        @exception
+        -
+        """
+        thread_actions: list[ThreadAction] = []
+        for file_path in file_paths:
+            # Threaded
+            def load_archive_as_new_mod_thread():
+                new_mod = Mod("")
+                new_mod.load_archive_file(file_path)
+                return new_mod
+
+            # Main thread
+            def load_archive_as_new_mod_thread_done(new_mod: Mod):
+                new_mod.name = f"mod_{self.mod_counter}"
+                if self.mod_handler.has_mod(new_mod.name):
+                    self.mod_counter += 1
+                    new_mod.name = f"mod_{self.mod_counter}"
+                    while self.mod_handler.has_mod(new_mod.name):
+                        self.mod_counter += 1
+                        new_mod.name = f"mod_{self.mod_counter}"
+
+                if new_mod.name in self.mod_states:
+                    raise AssertionError(
+                        "No name conflict on mod handle but name conflict on viewer"
+                        " state."
+                    )
+
+                self.mod_handler.add_new_mod(new_mod.name, new_mod)
+                self.mod_states[new_mod.name] = ModViewerState(
+                    new_mod, BankViewerState(new_mod.get_wwise_banks())
+                )
+
+                bank_names: list[str] = [
+                    bank.get_name().replace("/", "_").replace("\x00", "")
+                    for bank in new_mod.get_wwise_banks().values()
+                    if bank.hierarchy != None
+                ]
+
+                def on_hirc_record_update_done(_):
+                    self.mod_states[new_mod.name] \
+                        .bank_state.create_bank_hirc_view(new_mod, self.hirc_records)
+                    logger.info(f"Loaded {os.path.basename(file_path)} as a new mod")
+
+                on_hirc_record_done_action = Action[ModViewerState, None](
+                    self.mod_states[new_mod.name],
+                    on_hirc_record_update_done,
+                    on_cancel = on_cancel, on_reject = on_reject
+                )
+                    
+                self.fetch_bank_hirc_obj_record(
+                    self.mod_states[new_mod.name], bank_names, 
+                    on_cancel, on_hirc_record_done_action, on_reject
+                )
+
+            load_archive_as_new_mod_thread_done_action = Action[AppState, None](
+                self, load_archive_as_new_mod_thread_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject
+            )
+
+            thread_actions.append(self.logic_loop.queue_thread_action(
+                self, load_archive_as_new_mod_thread, 
+                on_cancel, load_archive_as_new_mod_thread_done_action, on_reject
+            ))
+
+        return thread_actions
+
+    def load_archive_on_exist_mod(
+        self, 
+        file_paths: list[str],
+        mod_state: ModViewerState,
+        on_cancel: Callable[..., None] | None = None,
+        on_reject: Callable[[BaseException | Exception | None], None] | None = None
+    ):
+        """
+        @description
+        - load some new (potential) archives into an existence mod
 
         @exception
         - OSError
         - sqlite3.Error
         - Exception
         """
-        file_handler = bank_state.file_handler
+        if mod_state.mod.name not in self.mod_states:
+            raise AssertionError(
+                f"Mod instance with name {mod_state.mod.name} is not tracked in "
+                "list of ModViewerState."
+            )
 
-        if file_path in self.loaded_files:
-            return
+        def load_archive(file_path: str):
+            return GameArchive.from_file(file_path)
 
-        file_handler = bank_state.file_handler
-        file_reader = file_handler.file_reader
+        def on_load_archives_done(new_game_archives: list[GameArchive]):
 
-        old_loaded_file_path = file_reader.path
-        if old_loaded_file_path != "" and old_loaded_file_path not in self.loaded_files:
-            raise AssertionError(f"File {old_loaded_file_path} is not being "
-                                 "tracked in the set of loaded file.")
+            old_bank_names: set[str] = set([
+                bank.get_name().replace("/", "_").replace("\x00", "")
+                for bank in mod_state.mod.get_wwise_banks().values()
+                if bank.hierarchy != None
+            ])
 
-        file_handler.load_archive_file(file_path)
-        if file_handler.file_reader.path != file_path:
-            raise AssertionError("Path is not being normalized to POSIX standard."
-                                 f"Input: {file_path}; Stored: {file_reader.path}")
+            def add_game_archive(game_archive: GameArchive):
+                mod_state.mod.add_game_archive(game_archive)
 
-        if old_loaded_file_path != "":
-            self.loaded_files.remove(old_loaded_file_path)
+            for new_game_archive in new_game_archives:
+                add_game_archive_action = Action[ModViewerState, None](
+                    mod_state, add_game_archive, 
+                    on_cancel = on_cancel, on_reject = on_reject,
+                    prev_result = new_game_archive
+                )
+                self.logic_loop.queue_micro_action(add_game_archive_action)
 
-        try:
-            self.fetch_bank_hirc_obj_record(bank_state)
-        except (sqlite3.Error, OSError) as err:
-            logger.error(err)
+            def on_add_game_archives_done(_):
+                new_bank_names: set[str] = set([
+                    bank.get_name().replace("/", "_").replace("\x00", "")
+                    for bank in mod_state.mod.get_wwise_banks().values()
+                    if bank.hierarchy != None
+                ])
 
-        bank_state.create_bank_hirc_view(self.hirc_records)
+                diff = list(new_bank_names.difference(old_bank_names))
 
-        self.loaded_files.add(file_path)
+                def on_hirc_record_update_done(_):
+                    mod_state.bank_state.create_bank_hirc_view(
+                        mod_state.mod, self.hirc_records
+                    )
+
+                on_hirc_record_update_done_action = Action[ModViewerState, None](
+                    mod_state, on_hirc_record_update_done, 
+                    on_cancel = on_cancel, on_reject = on_reject
+                )
+
+                self.fetch_bank_hirc_obj_record(
+                    mod_state, diff, 
+                    on_cancel, on_hirc_record_update_done_action, on_reject
+                )
+
+            on_add_game_archives_done_action = Action[ModViewerState, None](
+                mod_state, on_add_game_archives_done,
+                on_cancel = on_cancel, on_reject = on_reject
+            )
+
+            self.logic_loop.queue_micro_action(on_add_game_archives_done_action)
+
+        on_load_archives_done_action = Action[ModViewerState, None](
+            mod_state, on_load_archives_done, 
+            on_cancel = on_cancel, on_reject = on_reject
+        )
+
+        return self.logic_loop.queue_thread_reduce_action(
+            mod_state, load_archive, file_paths, 
+            on_cancel, on_load_archives_done_action, on_reject,
+        )
 
     def run_logic_loop(self):
-        self.logic_loop.process()
+        exceeded = self.logic_loop.process(self.frame_rate - (time.perf_counter_ns() - self.prev_timer))
         self.process_gc_banks()
+        return exceeded
 
     def process_modals(self):
         self.modal_loop.process_critical_modal()
@@ -396,47 +645,10 @@ class AppState:
         self.modal_loop.process_confirm_modals()
 
     def process_gc_banks(self):
-        num_gc_banks = len(self.gc_banks)
-
-        while len(self.gc_banks) > 0:
-            bid = self.gc_banks.popleft()
-
-            if bid not in self.bank_states:
-                raise AssertionError(
-                    f"{bid} does not have an associate " "bank state.")
-
-            self._gc_bank(bid)
-
-        if num_gc_banks > 0:
-            gc.collect()
-
-
-    def queue_file_picker_task(
-        self,
-        title: str,
-        callback: Callable[[list[str]], None],
-        default_path: str = "",
-        filters: list[str] | None = None,
-        multi: bool = False
-    ):
-        self.logic_loop.queue_file_picker_task(
-            title, callback, default_path, filters, multi)
-
-    def queue_folder_picker_task(
-        self,
-        title: str,
-        callback: Callable[[str], None], 
-        default_path: str = ""
-    ):
-        self.logic_loop.queue_folder_picker_task(title, callback, default_path)
-
-    def queue_macro_task(self, task: Callable[..., None]):
-        self.logic_loop.queue_macro_task(task)
+        pass
 
     def queue_confirm_modal(
-        self, 
-        msg: str,
-        callback: Callable[[bool], None] | None = None
+        self, msg: str, callback: Callable[[bool], None] | None = None
     ):
         self.modal_loop.queue_confirm_modal(msg, callback)
 
@@ -447,38 +659,22 @@ class AppState:
         self.modal_loop.queue_warning_modal(msg)
 
     def gc_bank(self, bank_state_id: str):
-        """
-        @exception
-        - AssertionError
-        """
-        if bank_state_id in self.gc_banks:
-            raise AssertionError(f"Garbage collect bank {bank_state_id} more than once!")
-
-        if bank_state_id not in self.bank_states:
-            raise AssertionError(f"Bank {bank_state_id} does not exist!")
-        
-        self.gc_banks.append(bank_state_id)
+        pass
 
     def _gc_bank(self, bid: str):
-        bank_state = self.bank_states.pop(bid)
-        file_path = bank_state.file_handler.file_reader.path
-
-        if file_path == "":
-            return
-
-        if file_path not in self.loaded_files:
-            raise AssertionError(
-                    f"File {file_path} is not being tracked in the list of "
-                    "loaded file.")
-
-        self.loaded_files.remove(file_path)
+        pass
 
     def __str__(self):
-        s = f"# of bank states: {len(self.bank_states)}"
-        for bid, state in self.bank_states.items():
-            s += f"\n    {bid}: {state.file_handler.file_reader.path}"
-        s += f"\n# of loaded file: {len(self.loaded_files)}"
-        for p in self.loaded_files:
-            s += f"\n    {p}"
-        s += f"\n# of gc banks: {len(self.gc_banks)}"
-        return s
+        status = "AppState:"
+        status += f"\n\tDB access status: {'Enabled' if self.db_conn_config != None else 'Disabled'}"
+        status += f"\n\t# of hierarchy records: {len(self.hirc_records)}"
+        status += f"\n\tMod name counter: {self.mod_counter}"
+        status += f"\n\t# of mod viewer states: {len(self.mod_states)}"
+
+        status += "\n\nModal Loop State:"
+        status += f"\n{self.modal_loop.__str__()}"
+
+        status += "\n\nLogic Loop State:"
+        status += f"\n{self.logic_loop.__str__()}"
+
+        return status
