@@ -23,3 +23,6 @@ def language_lookup(lang_string):
         return LANGUAGE_MAPPING[lang_string]
     except:
         return int(lang_string)
+
+
+language = 0
