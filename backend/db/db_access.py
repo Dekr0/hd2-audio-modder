@@ -6,7 +6,6 @@ from typing import Callable
 
 import backend.db.db_schema_map as orm
 
-
 def config_sqlite_conn(db_path: str):
     """
     @exception
@@ -20,7 +19,7 @@ def config_sqlite_conn(db_path: str):
         @exception
         - sqlite3.Error
         """
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout = 5.0)
         return conn
 
     return _get_sqlite_conn
@@ -41,14 +40,15 @@ class SQLiteDatabase:
         else:
             raise RuntimeError("Failed to establish database connection")
 
-    def close(self):
+    def close(self, commit = False):
         """
         @exception
         - Any
         """
         if self.conn != None:
             self.cursor.close()
-            self.conn.commit()
+            if commit: 
+                self.conn.commit()
             self.conn.close()
 
     def commit(self):
@@ -96,7 +96,7 @@ class SQLiteDatabase:
         else:
             return [orm.SoundView(int(row[0]), int(row[1]), row[2], row[4], set(row[3].split(","))) for row in rows]
 
-    def get_hirc_objs_by_soundbank(self, bank_name: str, as_dict: bool = False) \
+    def get_hirc_objs_by_soundbank(self, bank_names: list[str], as_dict: bool = False) \
             -> dict[int, orm.HircObjRecord] | list[orm.HircObjRecord]:
         """
         @exception
@@ -104,8 +104,11 @@ class SQLiteDatabase:
         - AssertionError
         - sqlite3.*Error
         """
-        query = "SELECT wwise_object_id, type_db_id, parent_wwise_object_id, label, tags, description FROM hierarchy_object_view WHERE soundbank_path_name = ?"
-        rows = self.cursor.execute(query, (bank_name,))
+        if len(bank_names) <= 0:
+            return {} if as_dict else []
+        cond = "OR ".join([f"soundbank_path_name = ?" for _ in range(len(bank_names))])
+        query = f"SELECT wwise_object_id, type_db_id, parent_wwise_object_id, label, tags, description FROM hierarchy_object_view WHERE {cond}"
+        rows = self.cursor.execute(query, tuple(bank_names))
         if as_dict:
             results: dict[int, orm.HircObjRecord] = {}
             for row in rows:
