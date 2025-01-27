@@ -10,11 +10,10 @@ import backend.db.db_schema_map as orm
 
 from backend.util import copy_to_clipboard
 from backend.const import VORBIS
-from backend.core import HircEntry, MusicSegment, RandomSequenceContainer, Sound
-from backend.core import AudioSource 
-from backend.core import FileHandler, SoundHandler
-from ui.file_picker import FilePickerTask
-from ui.event_loop import DBOperationTask
+from backend.wwise_hierarchy import HircEntry, MusicSegment, MusicTrack, RandomSequenceContainer, Sound
+from backend.core import AudioSource, Mod, WwiseBank
+from backend.core import SoundHandler
+from log import logger
 
 TREE_ROOT_VID = 0
 
@@ -85,14 +84,18 @@ class HircView:
     modified: bool = False
 
 
+class ModViewerState:
+
+    def __init__(self, mod: Mod, bank_state: 'BankViewerState'):
+        self.mod = mod
+        self.bank_state = bank_state
+
+
 class BankViewerState:
 
-    def __init__(self, sound_handler: SoundHandler):
+    def __init__(self, wwise_banks: dict[int, WwiseBank]):
         self.id = uuid.uuid4().hex
-        self.file_picker_task: deque[FilePickerTask] = deque(maxlen=1)
-        self.file_handler: FileHandler = FileHandler()
-        self.sound_handler = sound_handler
-
+        self.wwise_banks = wwise_banks
         """
         Each tree node will use a separate id for view instead of id coming from the 
         entry. 
@@ -126,19 +129,20 @@ class BankViewerState:
             usr_defined_label = "",
             children = []
         )
-        self.hirc_view_list = []
-        
+        self.hirc_view_list: list[HircView] = []
         self.imgui_selection_store = imgui.SelectionBasicStorage()
         self.mut_hirc_views: dict[int, HircView] = {}
         self.src_view: bool = True
         self.locked: bool = False
 
-    def close(self):
-        while len(self.file_picker_task) > 0:
-            task = self.file_picker_task.popleft()
-            task.cancel = True
+    def is_mut(self):
+        return len(self.mut_hirc_views) > 0
     
-    def create_bank_hirc_view(self, hirc_records: dict[int, orm.HircObjRecord]):
+    def create_bank_hirc_view(
+        self, 
+        mod: Mod,
+        hirc_records: dict[int, orm.HircObjRecord]
+    ):
         """
         @exception
         - AssertionError
@@ -151,9 +155,6 @@ class BankViewerState:
         hirc_views.clear()
         hirc_views_list.clear()
 
-        file_handler = self.file_handler
-        banks = file_handler.get_wwise_banks()
-
         contained_sounds: set[Sound] = set()
         if root.vid != 0:
             raise AssertionError(
@@ -164,8 +165,9 @@ class BankViewerState:
         hirc_views_list.append(root)
         idx += 1
 
-        for bank in banks.values():
-            if bank.hierarchy == None:
+        for bank in self.wwise_banks.values():
+            hirc = bank.hierarchy
+            if hirc == None:
                 # Logging
                 continue
             bank_name = bank.get_name().replace("/", "_") \
@@ -186,8 +188,8 @@ class BankViewerState:
 
             children = bank_view.children
             bank_idx = bank_view.vid
-            hirc_entries = bank.hierarchy.entries
-            for hirc_entry in hirc_entries.values():
+
+            for hirc_entry in hirc.get_entries():
                 if isinstance(hirc_entry, MusicSegment):
                     segment_id = hirc_entry.get_id()
 
@@ -211,7 +213,12 @@ class BankViewerState:
                     segment_view_id = segment_view.vid
 
                     for track_id in hirc_entry.tracks:
-                        track = hirc_entries[track_id]
+                        track = hirc.get_entry(track_id)
+                        if not isinstance(track, MusicTrack):
+                            raise AssertionError(
+                                f"Hierarchy entry {track_id} is not an instance "
+                                 "of MusicTrack."
+                            )
 
                         track_label = ""
                         if track_id in hirc_records:
@@ -236,27 +243,25 @@ class BankViewerState:
                                 continue
 
                             source_id = source_struct.source_id
-                            audio_source = file_handler.get_audio_by_id(source_id)
-                            if audio_source == None:
-                                # Logging?
-                                continue
-
-                            source_view = HircView(
-                                    data = audio_source,
-                                    vid = idx, 
-                                    parent_vid = track_view_id,
-                                    hirc_ul_ID = track_id,
-                                    default_label = f"{source_id}.wem",
-                                    hirc_obj_type = BankViewerTableType.AUDIO_SOURCE_MUSIC,
-                                    usr_defined_label = "", 
-                                    children = [])
-                            track_view.children.append(source_view)
-                            hirc_views_list.append(source_view)
-                            idx += 1 
+                            try:
+                                audio_source = mod.get_audio_source(source_id)
+                                source_view = HircView(
+                                        data = audio_source,
+                                        vid = idx, 
+                                        parent_vid = track_view_id,
+                                        hirc_ul_ID = track_id,
+                                        default_label = f"{source_id}.wem",
+                                        hirc_obj_type = BankViewerTableType.AUDIO_SOURCE_MUSIC,
+                                        usr_defined_label = "", 
+                                        children = [])
+                                track_view.children.append(source_view)
+                                hirc_views_list.append(source_view)
+                                idx += 1 
+                            except ValueError as err:
+                                pass
 
                         for info in track.track_info:
                             if info.event_id == 0:
-                                # Logging?
                                 continue
 
                             info_id = info.get_id()
@@ -300,66 +305,63 @@ class BankViewerState:
 
                     cntr_view_id = cntr_view.vid
                     for entry_id in hirc_entry.contents:
-                        entry = hirc_entries[entry_id] 
+                        entry = hirc.get_entry(entry_id)
                         if not isinstance(entry, Sound):
-                            # Logging
                             continue
 
                         if len(entry.sources) <= 0 or entry.sources[0].plugin_id != VORBIS:
                             continue
 
                         source_id = entry.sources[0].source_id
-                        audio_source = file_handler.get_audio_by_id(source_id)
-                        if audio_source == None:
-                            # Logging?
-                            continue
+                        try:
+                            audio_source = mod.get_audio_source(source_id)
+                            contained_sounds.add(entry)
 
-                        contained_sounds.add(entry)
+                            sound_label = ""
+                            if entry_id in hirc_records:
+                                sound_label = hirc_records[entry_id].label
 
-                        sound_label = ""
-                        if entry_id in hirc_records:
-                            sound_label = hirc_records[entry_id].label
-
-                        source_view = HircView(
-                                data = audio_source,
-                                vid = idx, 
-                                parent_vid = cntr_view_id,
-                                hirc_ul_ID = entry.hierarchy_id,
-                                default_label = f"{source_id}.wem",
-                                hirc_obj_type = BankViewerTableType.AUDIO_SOURCE,
-                                usr_defined_label = sound_label, 
-                                children = [])
-                        cntr_view.children.append(source_view)
-                        hirc_views_list.append(source_view)
-                        idx += 1
+                            source_view = HircView(
+                                    data = audio_source,
+                                    vid = idx, 
+                                    parent_vid = cntr_view_id,
+                                    hirc_ul_ID = entry.hierarchy_id,
+                                    default_label = f"{source_id}.wem",
+                                    hirc_obj_type = BankViewerTableType.AUDIO_SOURCE,
+                                    usr_defined_label = sound_label, 
+                                    children = [])
+                            cntr_view.children.append(source_view)
+                            hirc_views_list.append(source_view)
+                            idx += 1
+                        except ValueError as err:
+                            pass
                     
-            for hirc_entry in hirc_entries.values():
+            for hirc_entry in hirc.get_entries():
                 if not isinstance(hirc_entry, Sound) or hirc_entry in contained_sounds:
                     continue
 
-                source_id = hirc_entry.sources[0].source_id
-                audio_source = file_handler.get_audio_by_id(source_id)
-                if audio_source == None:
-                    # Logging?
-                    continue
+                try:
+                    source_id = hirc_entry.sources[0].source_id
+                    audio_source = mod.get_audio_source(source_id)
+                    sound_label = ""
+                    if hirc_entry.hierarchy_id in hirc_records:
+                        sound_label = hirc_records[hirc_entry.hierarchy_id].label
 
-                sound_label = ""
-                if hirc_entry.hierarchy_id in hirc_records:
-                    sound_label = hirc_records[hirc_entry.hierarchy_id].label
+                    source_view = HircView(
+                            data = audio_source,
+                            vid = idx, 
+                            parent_vid = bank_idx,
+                            hirc_ul_ID = hirc_entry.hierarchy_id, 
+                            default_label = f"{source_id}.wem",
+                            hirc_obj_type = BankViewerTableType.AUDIO_SOURCE,
+                            usr_defined_label = sound_label, 
+                            children = [])
 
-                source_view = HircView(
-                        data = audio_source,
-                        vid = idx, 
-                        parent_vid = bank_idx,
-                        hirc_ul_ID = hirc_entry.hierarchy_id, 
-                        default_label = f"{source_id}.wem",
-                        hirc_obj_type = BankViewerTableType.AUDIO_SOURCE,
-                        usr_defined_label = sound_label, 
-                        children = [])
-
-                children.append(source_view)
-                hirc_views_list.append(source_view)
-                idx += 1
+                    children.append(source_view)
+                    hirc_views_list.append(source_view)
+                    idx += 1
+                except ValueError as err:
+                    pass
 
     @staticmethod
     def unfold_selection(selects: list[HircView]):
@@ -423,6 +425,8 @@ class BankViewerState:
         pass
 
     def check_modified(self):
+        pass
+        """
         for hirc_view in self.hirc_view_list:
             data = hirc_view.data
             if isinstance(data, MusicSegment):
@@ -451,5 +455,4 @@ class BankViewerState:
                     curr_view.modified = modified
                     parent_view_id = curr_view.parent_vid
             # TODO event modification and string modification
-
-
+        """
