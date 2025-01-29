@@ -1,145 +1,161 @@
 # Module import
 import os
-import posixpath
-import sqlite3
 import subprocess
 from imgui_bundle import imgui, imgui_ctx
 
 from backend import env
 from backend.core import AudioSource
-from fileutil import to_posix
 from ui.bank_viewer.tree_selection_impl import apply_selection_reqs 
 from ui.ui_flags import * 
 from ui.ui_keys import *
 from ui.app_state import AppState
-from ui.bank_viewer.state import BankViewerTableHeader, BankViewerTableType
+from ui.bank_viewer.state import BankViewerTableHeader, BankViewerTableType, ModViewerState
 from ui.bank_viewer.state import BankViewerState, HircView
 
 from log import logger
 
 
-def gui_bank_viewer(
-        app_state: AppState, bank_state: BankViewerState):
-    """
-    @exception
-    - AssertionError
-    """
-    window_name = "Bank Viewer"
-    file_reader = bank_state.file_handler.file_reader
-    if file_reader.path != "":
-        window_name = f"{posixpath.basename(file_reader.path)} ({file_reader.path})"
+def gui_mod_viewer(app_state: AppState, mod_name: str, mod_state: ModViewerState):
+    ok, is_open = imgui.begin(mod_name, True, imgui.WindowFlags_.menu_bar.value)
 
-    view_port = imgui.get_main_viewport()
-    imgui.set_next_window_viewport(view_port.id_)
-    ok, is_open = imgui.begin(window_name, True, imgui.WindowFlags_.menu_bar.value)
     if not ok:
         imgui.end()
         return is_open
 
-    gui_bank_viewer_menu(app_state, bank_state)
-    gui_bank_viewer_table(app_state, bank_state)
+    gui_mod_viewer_menu(app_state, mod_state)
+
+    if imgui.begin_tab_bar(f"{mod_name}_tab_bar", TabBarFlags):
+        for bank_state in mod_state.bank_states:
+            gui_bank_viewer(app_state, mod_state, bank_state)
+        imgui.end_tab_bar()
 
     imgui.end()
-
     return is_open
 
 
-def gui_bank_viewer_menu(app_state: AppState, bank_state: BankViewerState):
+def gui_bank_viewer(
+    app_state: AppState, mod_state: ModViewerState,  bank_state: BankViewerState
+):
+    """
+    @exception
+    - AssertionError
+    """
+    bank_name = bank_state.wwise_bank.get_name() \
+                                     .replace("content/audio/", "") \
+                                     .replace("\x00", "")
+    ok, is_open = imgui.begin_tab_item(bank_name, True)
+    if not ok:
+        return is_open
+
+    gui_bank_viewer_table(app_state, mod_state, bank_state)
+
+    imgui.end_tab_item()
+    return is_open
+
+
+def gui_mod_viewer_menu(app_state: AppState, mod_state: ModViewerState):
     if not imgui.begin_menu_bar():
         return
-
-    gui_bank_viewer_load_menu(app_state, bank_state)
-    gui_bank_viewer_automation_menu(app_state, bank_state)
+    
+    gui_mod_viewer_load_menu(app_state, mod_state)
+    gui_mod_viewer_automation_menu(app_state, mod_state)
 
     imgui.end_menu_bar()
 
 
-def gui_bank_viewer_load_menu(app_state: AppState, bank_state: BankViewerState):
-    if not imgui.begin_menu("Load"):
+def gui_mod_viewer_load_menu(app_state: AppState, mod_state: ModViewerState):
+    disable = not app_state.logic_loop.has_issue_file_picker(mod_state)
+
+    if not imgui.begin_menu("Load", disable):
         return
 
-    gui_bank_viewer_load_archive_menu(app_state, bank_state)
+    gui_mod_viewer_load_archive_menu(app_state, mod_state)
 
     imgui.end_menu()
 
 
-def gui_bank_viewer_load_archive_menu(app_state: AppState, bank_state: BankViewerState):
+def gui_mod_viewer_load_archive_menu(app_state: AppState, mod_state: ModViewerState):
     if not imgui.begin_menu("Archive"):
         return
 
-    gui_bank_viewer_load_recent_archive_menu(app_state, bank_state)
+    gui_mod_viewer_load_recent_archive_menu(app_state, mod_state)
 
     if imgui.menu_item_simple("From Helldivers 2 Data Folder"):
-        if bank_state.file_picker_task != None:
-            app_state.queue_warning_modal(
-                "Please finish the current archive selection."
+        if os.path.exists(env.get_data_path()):
+            def on_cancel():
+                logger.warning(
+                    f"Loading a new archive into {mod_state.mod.name} is canceled"
+                )
+            def on_reject(err: BaseException | None):
+                if isinstance(err, AssertionError):
+                    app_state.queue_critical_modal("AssertionError", err)
+                else:
+                    app_state.queue_warning_modal(
+                        "Failed to load archiveas a single new mod.\n"
+                        "Check \"Log\" window."
+                    )
+                    logger.error(err)
+            def on_files_selected(file_paths: list[str]):
+                app_state.load_archive_on_exist_mod(
+                    file_paths, 
+                    mod_state,
+                    on_cancel,
+                    on_reject
+                )
+            app_state.logic_loop.queue_file_picker_action(
+                mod_state,
+                "Select Archives",
+                lambda file_paths: on_files_selected(file_paths),
+                env.get_data_path(),
+                multi = True
             )
         else:
-            if os.path.exists(env.get_data_path()):
-
-                def callback(file_path: str):
-                    file_path = to_posix(file_path)
-                    try:
-                        app_state.load_archive_exist_viewer(bank_state, file_path)
-                    except OSError as err:
-                        logger.error(err)
-                    except sqlite3.Error as err:
-                        logger.error(err)
-                    except AssertionError as err:
-                        app_state.queue_critical_modal("Assertion Error", err)
-                    except Exception as err:
-                        app_state.queue_critical_modal("Unhandle exception", err)
-
-                app_state.queue_file_picker_task(
-                    "Select An Archive",
-                    lambda paths: callback(paths[0]),
-                    env.get_data_path(),
-                    multi = False
-                )
-            else:
-                app_state.queue_warning_modal(
-                    "Incorrect Helldivers 2 data directory path.\n"
-                    "Please set it in the \"Setting\""
-                )
+            app_state.queue_warning_modal(
+                "Incorrect Helldivers 2 data directory path.\n"
+                "Please set it in the \"Setting\""
+            )
 
     if imgui.menu_item_simple("From File Explorer"):
-        if bank_state.file_picker_task != None:
-            app_state.queue_warning_modal(
-                "Please finish the current archive selection."
+        def on_cancel():
+            logger.warning(
+                f"Loading a new archive into {mod_state.mod.name} is canceled"
             )
-        else:
-            def callback(file_path: str):
-                file_path = to_posix(file_path)
-                try:
-                    app_state.load_archive_exist_viewer(bank_state, file_path)
-                except OSError as err:
-                    logger.error(err)
-                except sqlite3.Error as err:
-                    logger.error(err)
-                except AssertionError as err:
-                    app_state.queue_critical_modal("Assertion Error", err)
-                except Exception as err:
-                    app_state.queue_critical_modal("Unhandle exception", err)
-
-            app_state.queue_file_picker_task(
-                "Select An Archive",
-                lambda paths: callback(paths[0]),
-                multi = False
+        def on_reject(err: BaseException | None):
+            if isinstance(err, AssertionError):
+                app_state.queue_critical_modal("AssertionError", err)
+            else:
+                app_state.queue_warning_modal(
+                    "Failed to load archiveas a single new mod.\n"
+                    "Check \"Log\" window."
+                )
+                logger.error(err)
+        def on_files_selected(file_paths: list[str]):
+            app_state.load_archive_on_exist_mod(
+                file_paths, 
+                mod_state,
+                on_cancel,
+                on_reject
             )
+        app_state.logic_loop.queue_file_picker_action(
+            mod_state,
+            "Select Archives",
+            lambda file_paths: on_files_selected(file_paths),
+            multi = True
+        )
 
     imgui.end_menu()
 
 
-def gui_bank_viewer_automation_menu(app_state: AppState, bank_state: BankViewerState):
+def gui_mod_viewer_automation_menu(app_state: AppState, mod_state: ModViewerState):
     if not imgui.begin_menu("Automation"):
         return
 
-    gui_bank_viewer_target_import_menu(app_state, bank_state)
+    gui_mod_viewer_target_import_menu(app_state, mod_state)
 
     imgui.end_menu()
 
 
-def gui_bank_viewer_target_import_menu(app_state: AppState, bank_state: BankViewerState):
+def gui_mod_viewer_target_import_menu(app_state: AppState, mod_state: ModViewerState):
     if not imgui.begin_menu("Target Import"):
         return
 
@@ -153,8 +169,7 @@ def gui_bank_viewer_target_import_menu(app_state: AppState, bank_state: BankView
     imgui.end_menu()
 
 
-def gui_bank_viewer_load_recent_archive_menu(
-        app_state: AppState, bank_state: BankViewerState):
+def gui_mod_viewer_load_recent_archive_menu(app_state: AppState, mod_state: ModViewerState):
     recent_files = app_state.setting.recent_files
 
     if len(recent_files) <= 0:
@@ -166,24 +181,29 @@ def gui_bank_viewer_load_recent_archive_menu(
 
     for recent_file in app_state.setting.recent_files:
         if imgui.menu_item_simple(recent_file):
-            def callback():
-                normalized = to_posix(recent_file)
-                try:
-                    app_state.load_archive_exist_viewer(bank_state, normalized)
-                except OSError as err:
-                    logger.error(err)
-                except sqlite3.Error as err:
+            def on_cancel():
+                logger.warning(
+                    f"Loading a new archive into {mod_state.mod.name} is canceled"
+                )
+            def on_reject(err: BaseException | None):
+                if isinstance(err, AssertionError):
+                    app_state.queue_critical_modal("AssertionError", err)
+                else:
+                    app_state.queue_warning_modal(
+                        "Failed to load archiveas a single new mod.\n"
+                        "Check \"Log\" window."
+                    )
                     logger.error(err)
 
-            app_state.queue_macro_task(callback)
-
-            break
+            app_state.load_archive_on_exist_mod(
+                [recent_file], mod_state, on_cancel, on_reject
+            )
 
     imgui.end_menu()
 
 
-def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
-    if len(bank_state.file_handler.get_wwise_banks()) == 0:
+def gui_bank_viewer_table(app_state: AppState, mod_state: ModViewerState, bank_state: BankViewerState):
+    if bank_state.wwise_bank.hierarchy == None:
         return
 
     with imgui_ctx.push_id(bank_state.id):
@@ -195,13 +215,6 @@ def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
         if imgui.button("\ue97a") and bank_state.src_view:
             bank_state.src_view = False
             bank_state.imgui_selection_store.clear()
-
-        if app_state.is_db_enabled() and \
-           not app_state.is_db_write_busy() and \
-           not app_state.has_issue_db_write(bank_state): # Shouldn't happen
-            imgui.same_line()
-            if imgui.button("\ue161"):
-                gui_on_save_button_click(app_state, bank_state)
 
         if not imgui.begin_table(WidgetKey.BANK_HIERARCHY_TABLE, 7, TABLE_FLAGS):
             return
@@ -246,19 +259,7 @@ def gui_bank_viewer_table(app_state: AppState, bank_state: BankViewerState):
 
 
 def gui_on_save_button_click(app_state: AppState, bank_state: BankViewerState):
-    if app_state.is_db_write_busy():
-        app_state.queue_warning_modal(
-            "A database write operation is running.\n"
-            "Please wait for it to finish."
-        )
-    else:
-        def callback():
-            try:
-                app_state.write_hirc_obj_records(bank_state)
-            except AssertionError as err:
-                app_state.queue_critical_modal("Assertion Error", err)
-
-        app_state.queue_macro_task(callback)
+    pass
 
 
 def gui_bank_viewer_table_row_source_view(
@@ -366,9 +367,11 @@ def gui_bank_viewer_table_row_source_view(
                                      "binding data is not an instance of Audio "
                                      f"Source ({type(audio)}).")
             try:
-                bank_state \
-                        .sound_handler \
-                        .play_audio(audio.get_short_id(), audio.get_data())
+                data = audio.get_data()
+                if data != b"":
+                    app_state \
+                            .sound_handler \
+                            .play_audio(audio.get_short_id(), data)
             except (subprocess.CalledProcessError) as err:
                 logger.error(f"Failed to play audio. Reason: {err}")
                 # Or show modal
@@ -402,7 +405,10 @@ def gui_bank_viewer_table_row_source_view(
         imgui.table_next_column()
         imgui.push_item_width(-imgui.FLT_MIN)
         with imgui_ctx.push_id(f"c4_{hvid}"):
-            if not app_state.is_db_enabled() or app_state.is_db_write_busy():
+            disable = not app_state.is_db_enabled() or \
+                      app_state.logic_loop.is_db_write_busy() or \
+                      app_state.logic_loop.has_issue_file_picker(bank_state)
+            if disable:
                 imgui.text_disabled(hirc_view.usr_defined_label)
             else:
                 changed, next = imgui.input_text("", hirc_view.usr_defined_label)
@@ -465,9 +471,11 @@ def gui_bank_viewer_table_row_hirc_view(
                                      "binding data is not an instance of Audio "
                                      f"Source ({type(audio)}).")
             try:
-                bank_state \
-                        .sound_handler \
-                        .play_audio(audio.get_short_id(), audio.get_data())
+                data = audio.get_data()
+                if data != b"":
+                    app_state \
+                            .sound_handler \
+                            .play_audio(audio.get_short_id(), data)
             except (subprocess.CalledProcessError) as err:
                 logger.error(f"Failed to play audio. Reason: {err}")
                 # Or show modal
@@ -508,7 +516,12 @@ def gui_bank_viewer_table_row_hirc_view(
 
            imgui.push_item_width(-imgui.FLT_MIN)
 
-           if not app_state.is_db_enabled() or app_state.is_db_write_busy():
+
+           disable = not app_state.is_db_enabled() or \
+                     app_state.logic_loop.is_db_write_busy() or \
+                     app_state.logic_loop.has_issue_file_picker(bank_state)
+
+           if disable:
                imgui.text_disabled(hirc_view.usr_defined_label)
            else:
                changed, next = imgui.input_text("", hirc_view.usr_defined_label)
@@ -540,7 +553,7 @@ def gui_bank_table_item_ctx_menu(
         return
     
     if imgui.begin_menu("Copy"):
-        if imgui.menu_item_simple("As .CSV"):
+        if imgui.menu_item_simple("As .CSV", enabled=False):
             pass
         if imgui.begin_menu("As Plain Text"):
             if imgui.menu_item_simple("Audio Source Only"):
@@ -550,6 +563,21 @@ def gui_bank_table_item_ctx_menu(
             if imgui.menu_item_simple("Tree Structure With Descendant", enabled=False):
                 pass
             if imgui.menu_item_simple("Tree Structure With No Descendant", enabled=False):
+                pass
+            imgui.end_menu()
+        imgui.end_menu()
+
+    if imgui.begin_menu("Copy Target Import Schema"):
+        if imgui.begin_menu("CSV Target Import Schema"):
+            if imgui.menu_item_simple("With User Defined Label"):
+                bank_state.create_target_automation_csv(hirc_view, True)
+            if imgui.menu_item_simple("Without User Defined Label"):
+                bank_state.create_target_automation_csv(hirc_view)
+            imgui.end_menu()
+        if imgui.begin_menu("JSON Target Import Schema", enabled=False):
+            if imgui.menu_item_simple("With User Defined Label", enabled=False):
+                pass
+            if imgui.menu_item_simple("Without User Defined Label", enabled=False):
                 pass
             imgui.end_menu()
         imgui.end_menu()
