@@ -10,7 +10,7 @@ from imgui_bundle import hello_imgui, imgui
 from backend.db.db_access import config_sqlite_conn
 from log import logger
 from ui.app_state import AppState
-from ui.bank_viewer.draw_gui import gui_mod_viewer
+from ui.mod_viewer.draw_gui import gui_mod_viewer
 from ui.task_def import Action
 
 

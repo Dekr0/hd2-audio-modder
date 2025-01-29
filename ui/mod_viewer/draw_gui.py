@@ -5,12 +5,12 @@ from imgui_bundle import imgui, imgui_ctx
 
 from backend import env
 from backend.core import AudioSource
-from ui.bank_viewer.tree_selection_impl import apply_selection_reqs 
+from ui.mod_viewer.tree_selection_impl import apply_selection_reqs 
 from ui.ui_flags import * 
 from ui.ui_keys import *
 from ui.app_state import AppState
-from ui.bank_viewer.state import BankViewerTableHeader, BankViewerTableType, ModViewerState
-from ui.bank_viewer.state import BankViewerState, HircView
+from ui.mod_viewer.state import BankViewerTableHeader, BankViewerTableType, ModViewerState
+from ui.mod_viewer.state import BankViewerState, HircView
 
 from log import logger
 

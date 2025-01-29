@@ -15,7 +15,7 @@ from backend.core import GameArchive, Mod, ModHandler, SoundHandler
 from backend.db.db_access import SQLiteDatabase
 from log import logger, std_formatter
 from setting import Setting
-from ui.bank_viewer.state import BankViewerState, ModViewerState
+from ui.mod_viewer.state import BankViewerState, ModViewerState
 from ui.event_loop import EventLoop
 from ui.task_def import Action, ThreadAction, UnscheudledThreadAction
 

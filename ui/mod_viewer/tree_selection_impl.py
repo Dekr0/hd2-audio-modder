@@ -1,7 +1,7 @@
 from imgui_bundle import imgui
 
-from ui.bank_viewer.state import BankViewerTableType, TREE_ROOT_VID
-from ui.bank_viewer.state import BankViewerState, HircView
+from ui.mod_viewer.state import BankViewerTableType, TREE_ROOT_VID
+from ui.mod_viewer.state import BankViewerState, HircView
 
 
 """
