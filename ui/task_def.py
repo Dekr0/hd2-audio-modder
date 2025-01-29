@@ -57,6 +57,43 @@ class Action[I, R]:
             self.on_result.reject(err)
 
 
+class UnscheudledThreadAction[I, R]:
+
+    def __init__(
+        self,
+        actor: I,
+        task: Callable[..., R],
+        params: Any,
+        on_cancel: Callable[..., None] | None = None,
+        on_result: Action[I, R] | None = None,
+        on_reject: Callable[[BaseException], None] | None = None,
+        state: State = State.pending
+    ):
+        self.actor: I = actor
+        self.task: Callable[..., R] = task
+        self.params: Any = params
+        self.on_cancel: Callable[..., None] | None = on_cancel
+        self.on_result: Action[I, R] | None = on_result
+        self.on_reject: Callable[[BaseException], None] | None = on_reject
+        self.state: State = state
+
+    def cancel(self):
+        self.state = State.cancel
+        if self.on_result != None:
+            self.on_result.cancel()
+
+    def reject(
+        self, 
+        err: BaseException = InterruptedError(
+            "Forced rejection. All subsequent actions are reject"
+        )
+    ):
+        self.state = State.reject
+        self.err = err
+        if self.on_result != None:
+            self.on_result.reject(err)
+
+
 class ThreadAction[I, R]:
 
     def __init__(
