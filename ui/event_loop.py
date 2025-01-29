@@ -3,6 +3,7 @@ This is a callback based event loop. It most likely to be a very bad design.
 """
 
 import time
+import functools
 
 from collections import deque
 from collections.abc import Callable
@@ -12,7 +13,7 @@ from typing import Any, Iterable
 from imgui_bundle import portable_file_dialogs as pfd
 
 from log import logger
-from ui.task_def import FilePickerAction, FolderPickerAction, ThreadReduceAction
+from ui.task_def import FilePickerAction, FolderPickerAction, ThreadReduceAction, UnscheudledThreadAction
 from ui.task_def import Action, ThreadAction 
 from ui.task_def import State
 
@@ -31,6 +32,7 @@ class EventLoop:
         self.file_picker_actions: deque[FilePickerAction] = deque()
         self.folder_picker_actions: deque[FolderPickerAction] = deque()
         self.micro_actions: deque[Action] = deque()
+        self.unscheduled_thread_actions: deque[UnscheudledThreadAction] = deque()
         self.thread_actions: deque[ThreadAction] = deque()
         self.thread_reduce_actions: deque[ThreadReduceAction] = deque()
         self.db_write_action: deque[ThreadAction] = deque(maxlen=1)
@@ -42,6 +44,7 @@ class EventLoop:
                         len(self.file_picker_actions) + \
                         len(self.folder_picker_actions) + \
                         len(self.micro_actions) + \
+                        len(self.unscheduled_thread_actions) + \
                         len(self.thread_actions) + \
                         len(self.thread_reduce_actions) + \
                         len(self.db_write_action)
@@ -197,19 +200,26 @@ class EventLoop:
         self,
         actor: I,
         task: Callable[..., R],
+        params: Any,
         on_cancel: Callable[..., None] | None = None,
         on_result: Action[I, Any] | None = None,
         on_reject: Callable[[BaseException], None] | None = None,
         state: State = State.pending,
     ):
-        t = ThreadAction(
-            actor, self.pool.submit(task), on_cancel, on_result, on_reject, state
-        )
+        if len(self.thread_actions) <= 4:
+            binding = functools.partial(task, params)
+            t = ThreadAction(
+                actor, self.pool.submit(binding), on_cancel, on_result, on_reject, state
+            )
+            self.thread_actions.append(t)
+            logger.debug("Queued a thread action")
+        else:
+            t = UnscheudledThreadAction(
+                actor, task, params, on_cancel, on_result, on_reject, state
+            )
+            self.unscheduled_thread_actions.append(t)
+            logger.debug("Queued a thread action but it's unscheudled")
 
-        self.thread_actions.append(t)
-
-        logger.debug("Queued a thread action")
-        
         return t
 
     def queue_thread_reduce_action[I, R](
@@ -226,7 +236,8 @@ class EventLoop:
         fs: list[futures.Future[R]] = []
 
         for i in iterable:
-            fs.append(self.pool.submit(lambda: task(i)))
+            binding = functools.partial(task, i)
+            fs.append(self.pool.submit(binding))
 
         r = ThreadReduceAction(actor, fs, on_cancel, on_result, on_reject, state, partial)
 
@@ -262,6 +273,8 @@ class EventLoop:
         return t
 
     def process(self, remain: int):
+        if self.is_idle():
+            return
         # [Thread Action]
         prev = time.perf_counter_ns()
 
@@ -527,6 +540,22 @@ class EventLoop:
         for remove in removes:
             self.thread_actions.remove(remove)
 
+        if len(self.unscheduled_thread_actions) > 0:
+            while len(self.thread_actions) <= 4 and \
+                  len(self.unscheduled_thread_actions) > 0:
+                top = self.unscheduled_thread_actions.popleft()
+                binding = functools.partial(top.task, top.params)
+                self.thread_actions.append(
+                    ThreadAction(
+                        top.actor,
+                        self.pool.submit(binding),
+                        top.on_cancel,
+                        top.on_result,
+                        top.on_reject,
+                        top.state
+                    )
+                )
+
         logger.debug(f"Processed {len(removes)} thread actions. "
                      f"{len(self.thread_actions)} remains")
 
@@ -591,7 +620,7 @@ class EventLoop:
 
                     err = f.exception()
                     if err != None:
-                        reduce.state= State.reject
+                        reduce.state = State.reject
                         reduce.reject(err)
                         if reduce.on_reject != None:
                             reduce.on_reject(err)
@@ -706,6 +735,7 @@ class EventLoop:
     def __str__(self):
         s = f"\t# of event action: {len(self.event_actions)}"
         s += f"\n\t# of micro action: {len(self.micro_actions)}"
+        s += f"\n\t# of unscheudled thread action: {len(self.unscheduled_thread_actions)}"
         s += f"\n\t# of threaded action: {len(self.thread_actions)}"
         s += f"\n\t# of active database write action: {len(self.db_write_action)}"
         s += f"\n\t# of file picker action: {len(self.file_picker_actions)}"
