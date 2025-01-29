@@ -199,6 +199,7 @@ def create_dockable_windows(app_state: AppState):
     for mod_name, mod_state in app_state.mod_states.items():
         mod_window = hello_imgui.DockableWindow()
         mod_window.label = mod_name
+        mod_window.can_be_closed = True
         mod_window.call_begin_end = False
         mod_window.gui_function = create_gui_function(app_state, mod_name, mod_state)
         if size <= 4:
