@@ -34,3 +34,7 @@ TREE_NODE_FLAGS  = imgui.TreeNodeFlags_.span_avail_width.value | \
                    imgui.TreeNodeFlags_.open_on_arrow.value | \
                    imgui.TreeNodeFlags_.open_on_double_click.value
 
+TabBarFlags = imgui.TabBarFlags_.reorderable.value | \
+              imgui.TabBarFlags_.auto_select_new_tabs.value | \
+              imgui.TabBarFlags_.tab_list_popup_button.value | \
+              imgui.TabBarFlags_.fitting_policy_scroll.value
