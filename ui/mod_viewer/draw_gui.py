@@ -1,4 +1,5 @@
 # Module import
+import functools
 import os
 import subprocess
 from imgui_bundle import imgui, imgui_ctx
@@ -6,6 +7,7 @@ from imgui_bundle import imgui, imgui_ctx
 from backend import env
 from backend.core import AudioSource
 from ui.mod_viewer.tree_selection_impl import apply_selection_reqs 
+from ui.task_def import Action
 from ui.ui_flags import * 
 from ui.ui_keys import *
 from ui.app_state import AppState
@@ -20,6 +22,24 @@ def gui_mod_viewer(app_state: AppState, mod_name: str, mod_state: ModViewerState
 
     if not ok:
         imgui.end()
+        if not is_open:
+            def on_reject(err: BaseException | None):
+                if err == None:
+                    app_state.queue_critical_modal(
+                        "AssertionError", AssertionError(
+                            "Rejection function received None."
+                        )
+                    )
+                elif isinstance(err, AssertionError):
+                    app_state.queue_critical_modal("AssertionError", err)
+                else:
+                    app_state.queue_critical_modal("Unhandle Exception", err)
+            app_state.logic_loop.queue_event(Action[ModViewerState, None](
+                mod_state,
+                lambda: app_state.gc_mod(mod_name, mod_state),
+                on_reject = on_reject
+            ))
+
         return is_open
 
     gui_mod_viewer_menu(app_state, mod_state)
@@ -30,7 +50,24 @@ def gui_mod_viewer(app_state: AppState, mod_name: str, mod_state: ModViewerState
         imgui.end_tab_bar()
 
     imgui.end()
-    return is_open
+
+    if not is_open:
+        def on_reject(err: BaseException | None):
+            if err == None:
+                app_state.queue_critical_modal(
+                    "AssertionError", AssertionError(
+                        "Rejection function received None."
+                    )
+                )
+            elif isinstance(err, AssertionError):
+                app_state.queue_critical_modal("AssertionError", err)
+            else:
+                app_state.queue_critical_modal("Unhandle Exception", err)
+        app_state.logic_loop.queue_event(Action[ModViewerState, None](
+            mod_state,
+            lambda _: app_state.gc_mod(mod_name, mod_state),
+            on_reject = on_reject
+        ))
 
 
 def gui_bank_viewer(
