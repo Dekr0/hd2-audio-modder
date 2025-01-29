@@ -24,7 +24,7 @@ from ui.task_def import Action, ThreadAction, UnscheudledThreadAction
 class CriticalModalState:
 
     msg: str
-    err: Exception
+    err: BaseException
     is_trigger: bool = False
 
 
@@ -157,7 +157,7 @@ class ModalLoop:
     
         imgui.end_popup()
 
-    def queue_critical_modal(self, msg: str, err: Exception):
+    def queue_critical_modal(self, msg: str, err: BaseException):
         self.critical_modal.append(CriticalModalState(msg, err))
 
     def queue_warning_modal(self, msg: str):
@@ -200,7 +200,6 @@ class AppState:
 
         self.mod_counter: int = 0 # never decrease, used for mod initialization
         self.mod_states: dict[str, ModViewerState] = {}
-        self.gc_banks: deque[str] = deque()
 
         self.modal_loop = ModalLoop()
         self.logic_loop = EventLoop()
@@ -694,17 +693,23 @@ class AppState:
     ):
         self.modal_loop.queue_confirm_modal(msg, callback)
 
-    def queue_critical_modal(self, msg: str, err: Exception):
+    def queue_critical_modal(self, msg: str, err: BaseException):
         self.modal_loop.queue_critical_modal(msg, err)
 
     def queue_warning_modal(self, msg: str):
         self.modal_loop.queue_warning_modal(msg)
 
-    def gc_bank(self, _: str):
-        pass
-
-    def _gc_bank(self, _: str):
-        pass
+    def gc_mod(self, mod_name: str, mod_state: ModViewerState):
+        if mod_name not in self.mod_states:
+            raise AssertionError(
+                f"Failed to GC mod: {mod_name} is not being tracked."
+            )
+        if mod_state != self.mod_states.pop(mod_name):
+            raise AssertionError(
+                f"Failed to GC mod: {mod_name} is referencing different instance"
+                f" of ModViewerState"
+            )
+        self.rebuild_dock_space = True
 
     def __str__(self):
         status = "AppState:"
