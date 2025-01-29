@@ -10,6 +10,7 @@ from imgui_bundle import hello_imgui, imgui
 from backend.db.db_access import config_sqlite_conn
 from log import logger
 from ui.app_state import AppState
+from ui.bank_viewer.draw_gui import gui_mod_viewer
 from ui.task_def import Action
 
 
@@ -23,7 +24,7 @@ def main():
 
     runner_params = hello_imgui.RunnerParams()
     runner_params.app_window_params.window_title = "Shovel"
-    runner_params.app_window_params.window_geometry.size = (1280, 720)
+    runner_params.app_window_params.window_geometry.size = (1440, 900)
     runner_params.app_window_params.restore_previous_geometry = True
     runner_params.app_window_params.borderless = True
     runner_params.app_window_params.borderless_movable = True
@@ -31,7 +32,7 @@ def main():
     runner_params.app_window_params.borderless_closable = True
 
     runner_params.callbacks.load_additional_fonts = lambda: load_fonts(app_state)
-    
+
     runner_params.imgui_window_params.show_menu_bar = True
     runner_params.imgui_window_params.show_status_bar = True
     runner_params.imgui_window_params.show_menu_app = False
@@ -46,8 +47,11 @@ def main():
         hello_imgui.DefaultImGuiWindowType.provide_full_screen_dock_space
     )
 
+    runner_params.imgui_window_params.enable_viewports = True
+    runner_params.docking_params = rebuild_dockspace(app_state)
+
     def show_gui():
-        gui(app_state)
+        gui(runner_params, app_state)
 
     def pre_new_frame():
         app_state.run_logic_loop()
@@ -88,65 +92,131 @@ def show_status(app_state: AppState):
         imgui.text("Database write operation status: Active")
 
 
-def gui(app_state: AppState):
+def gui(runner_params: hello_imgui.RunnerParams, app_state: AppState):
     """
     @exception
     - AssertionError
     """
     app_state.start_timer()
-
-
     app_state.process_modals()
+    if app_state.rebuild_dock_space:
+        logger.info("Rebuilding dock space")
+        app_state.rebuild_dock_space = False
+        runner_params.docking_params = rebuild_dockspace(app_state)
+        runner_params.docking_params.layout_reset = True
 
-    gui_debug_state_windows(app_state)
 
-    gui_log_windows(app_state)
+def rebuild_dockspace(app_state: AppState):
+    docking_params = hello_imgui.DockingParams()
 
-    """
-    bank_states = app_state.bank_states
-    for bank_state_id, bank_state in bank_states.items():
-        is_open = gui_bank_viewer(app_state, bank_state)
-        if not is_open:
-            if app_state.logic_loop.has_issue_db_write_action(bank_state):
-                app_state.queue_warning_modal(
-                    "A database write operation is issued by this bank viewer\n"
-                    "Please wait for this to finished."
-                )
-                continue
-            if app_state.logic_loop.has_issue_file_picker(bank_state):
-                app_state.queue_warning_modal(
-                    "Please finish the active file picker."
-                )
-                continue
+    docking_params.docking_splits = create_default_docking_splits(app_state)
+    docking_params.dockable_windows = create_dockable_windows(app_state)
 
-            bank_state.close()
+    return docking_params
 
-            if not bank_state.is_mut():
-                app_state.gc_bank(bank_state_id)
 
-            def on_click(save: bool):
+def create_default_docking_splits(app_state: AppState):
+    splits: list[hello_imgui.DockingSplit] = []
 
-                def task(_):
-                    app_state.gc_bank(bank_state_id)
-                    if app_state.is_db_enabled and save:
-                        app_state.write_hirc_obj_records(bank_state)
+    log_space = hello_imgui.DockingSplit()
+    log_space.initial_dock = "MainDockSpace"
+    log_space.new_dock = "LogSpace"
+    log_space.direction = imgui.Dir.down
+    log_space.ratio = 0.30
+    splits.append(log_space)
 
-                def on_reject(err: Exception | None):
-                    if err == None:
-                        return
-                    app_state.queue_critical_modal("Assertion Error", err)
-                    
-                event = Event[AppState, None](app_state, task, on_reject = on_reject)
+    size = len(app_state.mod_states)
+    match size:
+        case 2:
+            mod_space_1 = hello_imgui.DockingSplit()
+            mod_space_1.initial_dock = "MainDockSpace"
+            mod_space_1.new_dock = "ModViewerSpace1"
+            mod_space_1.direction = imgui.Dir.left
+            mod_space_1.ratio = 0.50
+            splits.append(mod_space_1)
+        case 3:
+            mod_space_1 = hello_imgui.DockingSplit()
+            mod_space_1.initial_dock = "MainDockSpace"
+            mod_space_1.new_dock = "ModViewerSpace1"
+            mod_space_1.direction = imgui.Dir.left
+            mod_space_1.ratio = 0.50
+            splits.append(mod_space_1)
+            mod_space_2 = hello_imgui.DockingSplit()
+            mod_space_2.initial_dock = "MainDockSpace"
+            mod_space_2.new_dock = "ModViewerSpace2"
+            mod_space_2.direction = imgui.Dir.down
+            mod_space_2.ratio = 0.50
+            splits.append(mod_space_2)
+        case _:
+            mod_space_1 = hello_imgui.DockingSplit()
+            mod_space_1.initial_dock = "MainDockSpace"
+            mod_space_1.new_dock = "ModViewerSpace1"
+            mod_space_1.direction = imgui.Dir.up
+            mod_space_1.ratio = 0.50
+            splits.append(mod_space_1)
 
-                app_state.logic_loop.queue_event(event)
+            mod_space_2 = hello_imgui.DockingSplit()
+            mod_space_2.initial_dock = "MainDockSpace"
+            mod_space_2.new_dock = "ModViewerSpace2"
+            mod_space_2.direction = imgui.Dir.left
+            mod_space_2.ratio = 0.50
+            splits.append(mod_space_2)
 
-            # TODO, label which bank explorer is closing
-            app_state.queue_confirm_modal(
-                "There are unsave changes.\n"
-                "Save before closing this bank viewer?",
-                callback = on_click
-            )
-    """
+            mod_space_3 = hello_imgui.DockingSplit()
+            mod_space_3.initial_dock = "ModViewerSpace1"
+            mod_space_3.new_dock = "ModViewerSpace3"
+            mod_space_3.direction = imgui.Dir.right
+            mod_space_3.ratio = 0.50
+            splits.append(mod_space_3)
+
+    return splits 
+
+
+def create_dockable_windows(app_state: AppState):
+    windows: list[hello_imgui.DockableWindow] = []
+
+    log_window = hello_imgui.DockableWindow()
+    log_window.label = "Logs"
+    log_window.dock_space_name = "LogSpace"
+    log_window.call_begin_end = False
+    log_window.gui_function = lambda: gui_log_windows(app_state)
+    windows.append(log_window)
+
+    debug_window = hello_imgui.DockableWindow()
+    debug_window.label = "Debug"
+    debug_window.dock_space_name = "LogSpace"
+    debug_window.call_begin_end = False
+    debug_window.gui_function = lambda: gui_debug_window(app_state)
+    windows.append(debug_window)
+
+    size = len(app_state.mod_states)
+
+    def create_gui_function(app_state, mod_name, mod_state):
+        return lambda: gui_mod_viewer(app_state, mod_name, mod_state)
+
+    i = 1
+    size = len(app_state.mod_states)
+    for mod_name, mod_state in app_state.mod_states.items():
+        mod_window = hello_imgui.DockableWindow()
+        mod_window.label = mod_name
+        mod_window.call_begin_end = False
+        mod_window.gui_function = create_gui_function(app_state, mod_name, mod_state)
+        if size <= 4:
+            if i == size:
+                mod_window.dock_space_name = "MainDockSpace"
+            else:
+                mod_window.dock_space_name = f"ModViewerSpace{i}"
+        else:
+            if i == 4:
+                mod_window.dock_space_name = "MainDockSpace"
+            elif i > 4:
+                mod_window.dock_space_name = "ModViewerSpace1"
+            else:
+                mod_window.dock_space_name = f"ModViewerSpace{i}"
+        i += 1
+        windows.append(mod_window)
+
+    return windows 
 
 
 def gui_log_windows(app_state: AppState):
@@ -162,13 +232,10 @@ def gui_log_windows(app_state: AppState):
     return
 
 
-def gui_debug_state_windows(app_state: AppState):
-    ok, _ = imgui.begin("Debug State")
+def gui_debug_window(app_state: AppState):
+    ok, _ = imgui.begin("Debug")
     if ok:
         imgui.text(app_state.__str__())
-        imgui.end()
-        return
-
     imgui.end()
 
 
@@ -186,7 +253,7 @@ def gui_new_mod(app_state: AppState):
         return
 
     if imgui.menu_item_simple("Blank Mod"):
-        def event():
+        def event(_):
             app_state.create_blank_mod()
 
         def on_cancel():
@@ -222,7 +289,6 @@ def gui_load_archives_as_single_mod(app_state: AppState):
         if os.path.exists(env.get_data_path()):
             def on_cancel():
                 logger.warning("Loading archives as a single new mod is canceled.")
-
             def on_reject(err: BaseException | None):
                 if isinstance(err, AssertionError):
                     app_state.queue_critical_modal("AssertionError", err)
@@ -287,7 +353,6 @@ def gui_load_archives_as_separate_mods(app_state: AppState):
         if os.path.exists(env.get_data_path()):
             def on_cancel():
                 logger.warning("Loading archives as a single new mod is canceled.")
-
             def on_reject(err: BaseException | None):
                 if isinstance(err, AssertionError):
                     app_state.queue_critical_modal("AssertionError", err)
@@ -297,7 +362,6 @@ def gui_load_archives_as_separate_mods(app_state: AppState):
                         "Check \"Log\" window."
                     )
                     logger.error(err)
-
             def on_files_selected(file_paths: list[str]):
                 app_state.load_archive_as_separate_new_mods(
                     file_paths, on_cancel, on_reject
