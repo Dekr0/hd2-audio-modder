@@ -1,5 +1,4 @@
 import logging
-import os
 import sqlite3
 import time
 
@@ -18,7 +17,7 @@ from log import logger, std_formatter
 from setting import Setting
 from ui.bank_viewer.state import BankViewerState, ModViewerState
 from ui.event_loop import EventLoop
-from ui.task_def import Action, ThreadAction
+from ui.task_def import Action, ThreadAction, UnscheudledThreadAction
 
 
 @dataclass 
@@ -180,7 +179,7 @@ class ModalLoop:
 
 class AppState:
 
-    def __init__(self, frame_rate: float = 1 / 60.0 * 1_0_0000_0000):
+    def __init__(self, frame_rate: float = 1 / 30.0 * 1_0_0000_0000):
         self.gui_log_handler = CircularHandler()
         self.gui_log_handler.setFormatter(std_formatter)
         logger.addHandler(self.gui_log_handler)
@@ -207,6 +206,7 @@ class AppState:
         self.logic_loop = EventLoop()
 
         self.frame_rate = int(frame_rate)
+        self.rebuild_dock_space = False
         self.prev_timer = 0
 
     def start_timer(self):
@@ -319,7 +319,6 @@ class AppState:
         actor: I,
         bank_names: list[str], 
         on_cancel: Callable[..., None] | None = None,
-        on_hirc_record_update_done_action: Action[I, Any] | None = None,
         on_reject: Callable[[BaseException | None], None] | None = None
     ):
         """
@@ -353,16 +352,17 @@ class AppState:
                 self.hirc_records[wwise_object_id] = record
 
         fetch_action = Action[I, list[HircObjRecord]](
-            actor, fetch, on_cancel = on_cancel, on_reject = on_reject
-        )
-        on_fetch_done_action = Action[I, None](
-            actor, on_fetch_done,
+            actor,
+            fetch,
             on_cancel = on_cancel, 
-            on_result = on_hirc_record_update_done_action,
+            on_result = Action[I, None](
+                actor,
+                on_fetch_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject
+            ),
             on_reject = on_reject
         )
-        fetch_action.on_result = on_fetch_done_action
-
         self.logic_loop.queue_micro_action(fetch_action)
 
     def create_blank_mod(self):
@@ -375,9 +375,8 @@ class AppState:
                 new_mod_name = f"mod_{self.mod_counter}"
 
         new_mod = self.mod_handler.create_new_mod(new_mod_name)
-        self.mod_states[new_mod.name] = ModViewerState(
-            new_mod, BankViewerState(new_mod.get_wwise_banks())
-        )
+        self.mod_states[new_mod.name] = ModViewerState(new_mod)
+        self.rebuild_dock_space = True
 
     def load_archives_as_single_new_mod(
         self,
@@ -394,88 +393,106 @@ class AppState:
         @exception
         --
         """
+
+        # Thread
         def load_archive(file_path):
             return GameArchive.from_file(file_path)
 
+        # Main Thread
         def on_load_archives_done(new_game_archives: Iterable[GameArchive]):
-            new_mod_name = f"mod_{self.mod_counter}"
-            if self.mod_handler.has_mod(new_mod_name):
+            self.logic_loop.queue_thread_action(
+                self,
+                add_new_game_archives,
+                new_game_archives,
+                on_cancel = on_cancel,
+                on_result = Action[AppState, None](
+                    self,
+                    on_add_new_archives_done,
+                    on_cancel = on_cancel,
+                    on_reject = on_reject
+                ),
+                on_reject = on_reject
+            )
+
+        # Thread
+        def add_new_game_archives(new_game_archives: Iterable[GameArchive]):
+            new_mod = Mod("")
+    
+            for new_game_archive in new_game_archives:
+                new_mod.add_game_archive(new_game_archive)
+    
+            new_mod_state = ModViewerState(
+                new_mod, new_mod.get_wwise_banks().values()
+            )
+    
+            return new_mod_state
+
+        # Main Thread
+        def on_add_new_archives_done(new_mod_state: ModViewerState):
+            wwise_banks = new_mod_state.mod.get_wwise_banks().values()
+            bank_names: list[str] = [
+                    bank.get_name().replace("/", "_").replace("\x00", "")
+                    for bank in wwise_banks 
+                    if bank.hierarchy != None
+            ]
+            self.fetch_bank_hirc_obj_record(
+                self, bank_names,
+                on_cancel,
+                on_reject
+            )
+            self.logic_loop.queue_micro_action(Action[AppState, None](
+                self,
+                on_hirc_record_update_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject,
+                prev_result = new_mod_state
+            ))
+        
+        # Main Thread
+        def on_hirc_record_update_done(new_mod_state: ModViewerState):
+            for bank_state in new_mod_state.bank_states:
+                bank_state.create_bank_hirc_view(
+                    new_mod_state.mod, self.hirc_records
+                )
+
+            new_mod = new_mod_state.mod
+            new_mod.name = f"mod_{self.mod_counter}"
+            if self.mod_handler.has_mod(new_mod.name):
                 self.mod_counter += 1
-                new_mod_name = f"mod_{self.mod_counter}"
-                while self.mod_handler.has_mod(new_mod_name):
+                new_mod.name = f"mod_{self.mod_counter}"
+                while self.mod_handler.has_mod(new_mod.name):
                     self.mod_counter += 1
-                    new_mod_name = f"mod_{self.mod_counter}"
+                    new_mod.name = f"mod_{self.mod_counter}"
 
-            try:
-                new_mod = self.mod_handler.create_new_mod(new_mod_name)
-                self.mod_states[new_mod.name] = ModViewerState(
-                    new_mod, BankViewerState(new_mod.get_wwise_banks())
-                )
-
-                def add_game_archive_task(game_archive: GameArchive):
-                    new_mod.add_game_archive(game_archive)
-
-                for new_game_archive in new_game_archives:
-                    add_game_archive_action = Action[ModViewerState, None](
-                        self.mod_states[new_mod.name], add_game_archive_task,
-                        on_cancel = on_cancel, on_reject = on_reject,
-                        prev_result = new_game_archive
-                    )
-
-                    self.logic_loop.queue_micro_action(add_game_archive_action)
-
-                def on_add_game_archives_done(_):
-                    bank_names: list[str] = [
-                        bank.get_name().replace("/", "_").replace("\x00", "")
-                        for bank in new_mod.get_wwise_banks().values()
-                        if bank.hierarchy != None
-                    ]
-
-                    def on_hirc_record_update_done(_):
-                        self.mod_states[new_mod.name] \
-                            .bank_state.create_bank_hirc_view(new_mod, self.hirc_records)
-
-                    on_hirc_record_update_done_action = Action[ModViewerState, None](
-                        self.mod_states[new_mod.name], on_hirc_record_update_done, 
-                        on_cancel = on_cancel, on_reject = on_reject
-                    )
-
-                    self.fetch_bank_hirc_obj_record(
-                        self.mod_states[new_mod.name], bank_names,
-                        on_cancel, on_hirc_record_update_done_action, on_reject
-                    )
-
-                on_add_game_archives_done_action = Action[ModViewerState, None](
-                    self.mod_states[new_mod.name], on_add_game_archives_done,
-                    on_cancel = on_cancel, on_reject = on_reject
-                )
-
-                self.logic_loop.queue_micro_action(on_add_game_archives_done_action)
-            except KeyError:
+            if new_mod.name in self.mod_states:
                 raise AssertionError(
                     "No name conflict on mod handle but name conflict on viewer"
                     " state."
                 )
 
-        on_load_archives_done_action = Action[AppState, None](
-            self, on_load_archives_done,
-            on_cancel = on_cancel,
-            on_reject = on_reject
-        )
+            self.mod_handler.add_new_mod(new_mod.name, new_mod)
+            self.mod_states[new_mod.name] = new_mod_state
+            self.rebuild_dock_space = True
 
         return self.logic_loop.queue_thread_reduce_action(
-            self, load_archive, file_paths, 
-            on_cancel = on_cancel, 
-            on_result = on_load_archives_done_action,
+            self,
+            load_archive,
+            file_paths,
+            on_cancel = on_cancel,
+            on_result = Action[AppState, None](
+                self,
+                on_load_archives_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject,
+            ),
             on_reject = on_reject,
         )
-        
 
     def load_archive_as_separate_new_mods(
         self, 
         file_paths: list[str],
         on_cancel: Callable[..., None] | None = None,
-        on_reject: Callable[[BaseException | Exception | None], None] | None = None
+        on_reject: Callable[[BaseException | None], None] | None = None
     ):
         """
         @description
@@ -485,66 +502,76 @@ class AppState:
         @exception
         -
         """
-        thread_actions: list[ThreadAction] = []
-        for file_path in file_paths:
-            # Threaded
-            def load_archive_as_new_mod_thread():
-                new_mod = Mod("")
-                new_mod.load_archive_file(file_path)
-                return new_mod
+        thread_actions: list[ThreadAction | UnscheudledThreadAction] = []
 
-            # Main thread
-            def load_archive_as_new_mod_thread_done(new_mod: Mod):
+        # Thread
+        def load_archive(_file_path: str):
+            new_mod = Mod("")
+            new_mod.load_archive_file(_file_path)
+            return new_mod
+
+        # Main Thread
+        def on_load_archive_done(new_mod: Mod):
+            new_mod.name = f"mod_{self.mod_counter}"
+            if self.mod_handler.has_mod(new_mod.name):
+                self.mod_counter += 1
                 new_mod.name = f"mod_{self.mod_counter}"
-                if self.mod_handler.has_mod(new_mod.name):
+                while self.mod_handler.has_mod(new_mod.name):
                     self.mod_counter += 1
                     new_mod.name = f"mod_{self.mod_counter}"
-                    while self.mod_handler.has_mod(new_mod.name):
-                        self.mod_counter += 1
-                        new_mod.name = f"mod_{self.mod_counter}"
 
-                if new_mod.name in self.mod_states:
-                    raise AssertionError(
-                        "No name conflict on mod handle but name conflict on viewer"
-                        " state."
-                    )
-
-                self.mod_handler.add_new_mod(new_mod.name, new_mod)
-                self.mod_states[new_mod.name] = ModViewerState(
-                    new_mod, BankViewerState(new_mod.get_wwise_banks())
+            if new_mod.name in self.mod_states:
+                raise AssertionError(
+                    "No name conflict on mod handle but name conflict on viewer"
+                    " state."
                 )
 
-                bank_names: list[str] = [
-                    bank.get_name().replace("/", "_").replace("\x00", "")
-                    for bank in new_mod.get_wwise_banks().values()
-                    if bank.hierarchy != None
-                ]
+            self.mod_handler.add_new_mod(new_mod.name, new_mod)
+            mod_state = ModViewerState(
+                new_mod, new_mod.get_wwise_banks().values() 
+            )
+            self.mod_states[new_mod.name] = mod_state
 
-                def on_hirc_record_update_done(_):
-                    self.mod_states[new_mod.name] \
-                        .bank_state.create_bank_hirc_view(new_mod, self.hirc_records)
-                    logger.info(f"Loaded {os.path.basename(file_path)} as a new mod")
+            bank_names: list[str] = [
+                bank.get_name().replace("/", "_").replace("\x00", "")
+                for bank in new_mod.get_wwise_banks().values()
+                if bank.hierarchy != None
+            ]
 
-                on_hirc_record_done_action = Action[ModViewerState, None](
-                    self.mod_states[new_mod.name],
-                    on_hirc_record_update_done,
-                    on_cancel = on_cancel, on_reject = on_reject
-                )
-                    
-                self.fetch_bank_hirc_obj_record(
-                    self.mod_states[new_mod.name], bank_names, 
-                    on_cancel, on_hirc_record_done_action, on_reject
-                )
-
-            load_archive_as_new_mod_thread_done_action = Action[AppState, None](
-                self, load_archive_as_new_mod_thread_done,
-                on_cancel = on_cancel,
-                on_reject = on_reject
+            self.fetch_bank_hirc_obj_record(
+                mod_state,
+                bank_names,
+                on_cancel,
+                on_reject
             )
 
+            self.logic_loop.queue_micro_action(Action[ModViewerState, None](
+                mod_state,
+                on_hirc_record_update_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject,
+                prev_result = mod_state
+            ))
+
+        # Main Thread
+        def on_hirc_record_update_done(mod_state: ModViewerState):
+            for bank_state in mod_state.bank_states:
+                bank_state.create_bank_hirc_view(mod_state.mod, self.hirc_records)
+            self.rebuild_dock_space = True
+
+        for file_path in file_paths:
             thread_actions.append(self.logic_loop.queue_thread_action(
-                self, load_archive_as_new_mod_thread, 
-                on_cancel, load_archive_as_new_mod_thread_done_action, on_reject
+                self,
+                load_archive,
+                file_path,
+                on_cancel,
+                Action[AppState, None](
+                    self,
+                    on_load_archive_done,
+                    on_cancel = on_cancel,
+                    on_reject = on_reject
+                ),
+                on_reject
             ))
 
         return thread_actions
@@ -554,11 +581,11 @@ class AppState:
         file_paths: list[str],
         mod_state: ModViewerState,
         on_cancel: Callable[..., None] | None = None,
-        on_reject: Callable[[BaseException | Exception | None], None] | None = None
+        on_reject: Callable[[BaseException | None], None] | None = None
     ):
         """
         @description
-        - load some new (potential) archives into an existence mod
+        - load some new (potential) archives into an existence mod.
 
         @exception
         - OSError
@@ -575,63 +602,78 @@ class AppState:
             return GameArchive.from_file(file_path)
 
         def on_load_archives_done(new_game_archives: list[GameArchive]):
+            wwise_banks = mod_state.mod.get_wwise_banks().items()
 
-            old_bank_names: set[str] = set([
-                bank.get_name().replace("/", "_").replace("\x00", "")
-                for bank in mod_state.mod.get_wwise_banks().values()
-                if bank.hierarchy != None
-            ])
-
-            def add_game_archive(game_archive: GameArchive):
-                mod_state.mod.add_game_archive(game_archive)
+            old_bank_metadata: dict[int, str] = {
+                resource_id: wwise_bank.get_name().replace("/", "_").replace("\x00", "")
+                for resource_id, wwise_bank in wwise_banks if wwise_bank.hierarchy != None
+            }
 
             for new_game_archive in new_game_archives:
-                add_game_archive_action = Action[ModViewerState, None](
-                    mod_state, add_game_archive, 
-                    on_cancel = on_cancel, on_reject = on_reject,
+                self.logic_loop.queue_micro_action(Action[ModViewerState, None](
+                    mod_state,
+                    add_new_game_archive,
+                    on_cancel = on_cancel,
+                    on_reject = on_reject,
                     prev_result = new_game_archive
-                )
-                self.logic_loop.queue_micro_action(add_game_archive_action)
+                ))
 
-            def on_add_game_archives_done(_):
-                new_bank_names: set[str] = set([
-                    bank.get_name().replace("/", "_").replace("\x00", "")
-                    for bank in mod_state.mod.get_wwise_banks().values()
-                    if bank.hierarchy != None
-                ])
+            self.logic_loop.queue_micro_action(Action[ModViewerState, None](
+                mod_state,
+                on_add_new_game_archives_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject,
+                prev_result = old_bank_metadata
+            ))
+        
+        def add_new_game_archive(new_game_archive: GameArchive):
+            mod_state.mod.add_game_archive(new_game_archive)
 
-                diff = list(new_bank_names.difference(old_bank_names))
+        def on_add_new_game_archives_done(old_bank_metadata: dict[int, str]):
+            wwise_banks = mod_state.mod.get_wwise_banks().items()
 
-                def on_hirc_record_update_done(_):
-                    mod_state.bank_state.create_bank_hirc_view(
-                        mod_state.mod, self.hirc_records
+            new_bank_names: list[str] = []
+            new_bank_resource_ids: set[int] = set()
+            for resource_id, wwise_bank in wwise_banks:
+                if resource_id not in old_bank_metadata:
+                    mod_state.bank_states.append(BankViewerState(wwise_bank))
+                    new_bank_names.append(
+                        wwise_bank.get_name().replace("/", "_").replace("\x00", "")
                     )
+                    new_bank_resource_ids.add(resource_id)
 
-                on_hirc_record_update_done_action = Action[ModViewerState, None](
-                    mod_state, on_hirc_record_update_done, 
-                    on_cancel = on_cancel, on_reject = on_reject
-                )
-
-                self.fetch_bank_hirc_obj_record(
-                    mod_state, diff, 
-                    on_cancel, on_hirc_record_update_done_action, on_reject
-                )
-
-            on_add_game_archives_done_action = Action[ModViewerState, None](
-                mod_state, on_add_game_archives_done,
-                on_cancel = on_cancel, on_reject = on_reject
+            self.fetch_bank_hirc_obj_record(
+                mod_state, 
+                new_bank_names,
+                on_cancel,
+                on_reject
             )
 
-            self.logic_loop.queue_micro_action(on_add_game_archives_done_action)
+            self.logic_loop.queue_micro_action(Action[ModViewerState, None](
+                mod_state,
+                on_hirc_record_update_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject,
+                prev_result = new_bank_resource_ids,
+            ))
 
-        on_load_archives_done_action = Action[ModViewerState, None](
-            mod_state, on_load_archives_done, 
-            on_cancel = on_cancel, on_reject = on_reject
-        )
+        def on_hirc_record_update_done(new_bank_resource_ids: set[int]):
+            for bank_state in mod_state.bank_states:
+                if bank_state.wwise_bank.get_id() in new_bank_resource_ids:
+                    bank_state.create_bank_hirc_view(mod_state.mod, self.hirc_records)
 
         return self.logic_loop.queue_thread_reduce_action(
-            mod_state, load_archive, file_paths, 
-            on_cancel, on_load_archives_done_action, on_reject,
+            mod_state,
+            load_archive,
+            file_paths,
+            on_cancel,
+            Action[ModViewerState, None](
+                mod_state,
+                on_load_archives_done,
+                on_cancel = on_cancel,
+                on_reject = on_reject
+            ),
+            on_reject,
         )
 
     def run_logic_loop(self):
@@ -658,10 +700,10 @@ class AppState:
     def queue_warning_modal(self, msg: str):
         self.modal_loop.queue_warning_modal(msg)
 
-    def gc_bank(self, bank_state_id: str):
+    def gc_bank(self, _: str):
         pass
 
-    def _gc_bank(self, bid: str):
+    def _gc_bank(self, _: str):
         pass
 
     def __str__(self):
