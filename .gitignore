@@ -13,3 +13,4 @@ AudioConversionTemplate/
 test_mockup/
 **/database
 **/*.ini
+.vscode/
