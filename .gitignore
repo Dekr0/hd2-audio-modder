@@ -10,3 +10,6 @@ __pycache__/
 **/.venv
 AudioConversionProject/
 .vscode
+tests/mockup/csvs
+**/*.patch_*
+**/.tmp
