@@ -3,6 +3,7 @@ import locale
 import os
 import posixpath as xpath 
 import subprocess
+import uuid
 import xml.etree.ElementTree as etree
 
 from collections.abc import Iterable
@@ -56,6 +57,7 @@ async def wwise_project_migration(wwise_project: str):
 
 async def wwise_conversion(
     source_list: str, 
+    namespace: str,
     wwise_project: str = DEFAULT_WWISE_PROJECT
 ):
     if not os.path.exists(wwise_project):
@@ -63,12 +65,14 @@ async def wwise_conversion(
     if not os.path.exists(source_list):
         raise OSError(f"Source list: {source_list} does not exists.")
 
+    output = xpath.join(TMP, namespace)
+
     proc = await asyncio.create_subprocess_exec(
         *[
             WWISE_CLI, "convert-external-source", wwise_project,
             "--platform", "Windows",
             "--source-file", source_list,
-            "--output", TMP,
+            "--output", output,
          ]
     )
 
@@ -96,15 +100,20 @@ async def convert_wav_to_wem(
         raise NotImplementedError(
             "The current operating system does not support this feature."
         )
-    source_list = create_external_sources_list(wavs, conversion_setting)
+
+    namespace = uuid.uuid4().hex
+
+    os.mkdir(xpath.join(TMP, namespace))
+
+    source_list = create_external_sources_list(wavs, namespace, conversion_setting)
 
     rcode = await wwise_project_migration(wwise_project)
     if rcode != 0:
         raise CalledProcessError(rcode, f"{WWISE_CLI} migrate")
 
-    convert_dest = xpath.join(TMP, SYSTEM)
+    convert_dest = xpath.join(TMP, namespace, SYSTEM)
 
-    rcode = await wwise_conversion(source_list, wwise_project)
+    rcode = await wwise_conversion(source_list, namespace, wwise_project)
     if rcode != 0:
         raise CalledProcessError(rcode, f"{WWISE_CLI} convert-external-source")
 
@@ -185,6 +194,7 @@ def get_wem_length_sync(file_path: str):
 
 def create_external_sources_list(
     sources: Iterable[str], 
+    namespace: str,
     conversion_setting: str = DEFAULT_CONVERSION_SETTING
 ):
     root = etree.Element("ExternalSourcesList", attrib={
@@ -201,6 +211,8 @@ def create_external_sources_list(
             "Destination": xpath.basename(source)
         })
 
-    file.write(xpath.join(TMP, "external_sources.wsources"))
+    p = xpath.join(TMP, namespace, "external_sources.wsources")
+
+    file.write(p)
     
-    return xpath.join(TMP, "external_sources.wsources")
+    return p 
