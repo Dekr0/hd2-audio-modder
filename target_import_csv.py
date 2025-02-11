@@ -102,7 +102,6 @@ async def target_import_automation_csv(mod: Mod, csv_file: str):
 
     @exception
     - OSError
-        - The provided CSV file does not exist.
     """
     csv_file = fileutil.to_posix(csv_file, True)
 
@@ -177,5 +176,8 @@ async def target_import_automation_csv(mod: Mod, csv_file: str):
             line += 1
 
     await mod.import_wavs_async(target_import_pairs)
+
+    if not os.path.exists:
+        os.mkdir(os.path.exists)
 
     mod.write_patch(output)
