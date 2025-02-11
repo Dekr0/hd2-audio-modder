@@ -2150,7 +2150,11 @@ class Mod:
             )
 
         wems = {
-            os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"): targets for filepath, targets in wavs.items()}
+            os.path.join(
+                convert_dest, 
+                f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"
+            ): targets for filepath, targets in wavs.items()
+        }
 
         await self.import_wems_async(wems)
 
