@@ -1321,6 +1321,10 @@ class Mod:
         self.name: str = name
         
     def revert_all(self):
+        """
+        @exception
+        - AssertionError
+        """
         for audio in self.audio_sources.values():
             audio.revert_modifications()
         for bank in self.wwise_banks.values():
