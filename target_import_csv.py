@@ -65,14 +65,8 @@ async def target_import_automation_csv(mod: Mod, csv_path: str):
                 else:
                     overwrite_output = row[1]
                     if not xpath.isabs(overwrite_output):
-                        overwrite_workspace = fileutil.to_posix(overwrite_output, True)
-                    if os.path.exists(overwrite_output):
-                        output = overwrite_output
-                    else:
-                        logger.warning(
-                            f"The provided workspace {overwrite_output} does "
-                             "not exists."
-                        )
+                        overwrite_output = fileutil.to_posix(overwrite_output, True)
+                    output = overwrite_output
             else:
                 try:
                     from_file, targets = validate_target_import_csv_row(
@@ -100,8 +94,8 @@ async def target_import_automation_csv(mod: Mod, csv_path: str):
 
     await mod.import_wavs_async(target_import_pairs)
 
-    if not os.path.exists:
-        os.mkdir(os.path.exists)
+    if not os.path.exists(output):
+        os.mkdir(output)
 
     mod.write_patch(output)
 
