@@ -58,6 +58,7 @@ async def target_import_automation_json(
     tasks = manifest["tasks"]
     if len(tasks) == 1:
         await target_import_task(mod, tasks[0])
+        return
     
     isolated_tasks: list[Future] = []
     sequence_tasks: list[dict] = []
