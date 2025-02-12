@@ -1,13 +1,15 @@
 import asyncio
 import copy
+import functools
 import os
 import json
 import subprocess
 import jsonschema
 import posixpath as xpath
 
+from concurrent.futures import ProcessPoolExecutor as Pool
+from concurrent.futures import Future
 from typing import Any
-from multiprocessing.pool import AsyncResult, Pool
 
 import target_import_schema
 
@@ -57,17 +59,17 @@ async def target_import_automation_json(
     if len(tasks) == 1:
         await target_import_task(mod, tasks[0])
     
-    isolated_tasks: list[AsyncResult] = []
+    isolated_tasks: list[Future] = []
     sequence_tasks: list[dict] = []
 
     with Pool(workers) as p:
         for task in tasks:
             if task["revert_all"]["after"]:
-                isolated_tasks.append(p.apply_async(
+                binding = functools.partial(
                     target_import_task_process,
-                    (copy.deepcopy(mod), task),
-                    error_callback = default_error_callback
-                ))
+                    copy.deepcopy(mod), task,
+                )
+                isolated_tasks.append(p.submit(binding))
             else:
                 sequence_tasks.append(task)
 
@@ -81,9 +83,12 @@ async def target_import_automation_json(
         finished = 0
         while finished < len(isolated_tasks):
             for task in isolated_tasks:
-                if not task.ready():
+                if not task.done():
                     continue
                 finished += 1
+                err = task.exception()
+                if err != None:
+                    default_error_callback(err)
 
 
 def target_import_task_process(mod: Mod, task: dict):
