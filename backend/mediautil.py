@@ -105,13 +105,13 @@ async def convert_wav_to_wem(
 
     os.mkdir(xpath.join(TMP, namespace))
 
-    source_list = create_external_sources_list(wavs, namespace, conversion_setting)
+    source_list, wav_wem = create_external_sources_list(
+        wavs, namespace, conversion_setting
+    )
 
     rcode = await wwise_project_migration(wwise_project)
     if rcode != 0:
         raise CalledProcessError(rcode, f"{WWISE_CLI} migrate")
-
-    convert_dest = xpath.join(TMP, namespace, SYSTEM)
 
     rcode = await wwise_conversion(source_list, namespace, wwise_project)
     if rcode != 0:
@@ -122,7 +122,7 @@ async def convert_wav_to_wem(
     except OSError as err:
         logger.error(err)
 
-    return convert_dest
+    return wav_wem
 
 
 async def get_wem_length(file_path: str):
@@ -204,15 +204,28 @@ def create_external_sources_list(
 
     file = etree.ElementTree(root)
 
+    wav_wem: dict[str, str] = {}
+    duplicate: dict[str, int] = {}
     for source in sources:
+        basename = xpath.basename(source)
+        name, ext = xpath.splitext(basename)
+        dest = basename
+        if name in duplicate:
+            duplicate[name] += 1
+            suffix = duplicate[name]
+            dest = f"{name}_{suffix}{ext}"
+            wav_wem[source] = xpath.join(TMP, namespace, SYSTEM, f"{name}_{suffix}.wem")
+        else:
+            duplicate[name] = 0
+            wav_wem[source] = xpath.join(TMP, namespace, SYSTEM, f"{name}.wem")
         etree.SubElement(root, "Source", attrib={
             "Path": to_posix(source),
             "Conversion": conversion_setting,
-            "Destination": xpath.basename(source)
+            "Destination": dest
         })
 
     p = xpath.join(TMP, namespace, "external_sources.wsources")
 
     file.write(p)
     
-    return p 
+    return p, wav_wem
