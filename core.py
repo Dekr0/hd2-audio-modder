@@ -2142,23 +2142,20 @@ class Mod:
                 "The current operating system does not support this feature"
                 )
 
-        convert_dest = await mediautil.convert_wav_to_wem(
+        wav_wem = await mediautil.convert_wav_to_wem(
             list(wavs.keys()),
             wwise_project,
             conversion_setting
         )
 
-        if convert_dest == None:
+        if wav_wem == None:
             raise AssertionError(
                 "Bypassing validation: none zero wave files should return a "
                 "destination"
             )
-
-        wems = {
-            os.path.join(
-                convert_dest, 
-                f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"
-            ): targets for filepath, targets in wavs.items()
+        
+        wems = { 
+            wav_wem[file_path]: targets for file_path, targets in wavs.items() 
         }
 
         await self.import_wems_async(wems)
