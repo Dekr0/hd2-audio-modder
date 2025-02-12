@@ -1,16 +1,30 @@
 import argparse
+import asyncio
+import copy
+import functools
+import json
+import subprocess
 import sys
 import os
+import shutil
 import posixpath as xpath
 
-from multiprocessing.pool import AsyncResult, Pool
+from concurrent.futures import ProcessPoolExecutor as Pool
+from concurrent.futures import Future
 
 import env
+import target_import_csv
+import target_import_json
+import patch_automation as patch_automation_m
 from core import Mod
 from log import logger
 
 
 MAX_WORKER = 8
+
+
+def default_error_callback(err: BaseException):
+    logger.critical(f"Unhandle exception: {err}")
 
 
 def to_safe(args: argparse.Namespace):
@@ -69,10 +83,9 @@ def target_import_automation_task(archive: str, target_includes: list[str]):
     for include in target_includes:
         _, ext = os.path.splitext(include)
         if ext == ".csv":
-            logger.info(f"Running target import csv {include} for {archive}...")
             pass
         elif ext == ".json":
-            logger.info(f"Running target import json {include} for {archive}...")
+            pass
         else:
             logger.error(f"Unsupported automation file schema: {include}")
 
@@ -98,20 +111,25 @@ def target_import_automation(
     @return
     """
     if isolated:
-        tasks: list[AsyncResult] = []
+        logger.info("Isolation run is work in progress")
+
+        return
+
+        tasks: list[Future] = []
         with Pool(workers) as p:
             for archive in archives:
-                tasks.append(p.apply_async(
-                    target_import_automation_task, (archive, target_includes)
-                ))
+                binding = functools.partial(target_import_automation_task, archive, target_includes)
+                tasks.append(p.submit(binding))
 
             finished = 0
             while finished < len(tasks):
                 for task in tasks:
-                    if not task.ready():
+                    if not task.done():
                         continue
                     finished += 1
-                    task.get()
+                    err = task.exception()
+                    if err != None:
+                        default_error_callback(err)
     else:
         mod = Mod("main")
         data_path = env.get_data_path()
@@ -122,20 +140,53 @@ def target_import_automation(
                 logger.error(err)
             except BaseException as err:
                 logger.critical(f"Uncaught exception: {err}")
-        for include in target_includes:
-            _, ext = os.path.splitext(include)
-            if ext == ".csv":
-                logger.info(f"Running target import csv {include} for {archives}...")
-                pass
-            elif ext == ".json":
-                logger.info(f"Running target import json {include} for {archives}...")
-            else:
-                logger.error(f"Unsupported automation file schema: {include}")
+        with Pool(workers) as p:
+            tasks: list[Future] = []
+            for include in target_includes:
+                _, ext = os.path.splitext(include)
+                if ext == ".csv":
+                    tasks.append(
+                        p.submit(
+                            functools.partial(
+                                csv_entry_point, 
+                                copy.deepcopy(mod), include
+                            )
+                        )
+                    )
+                elif ext == ".json":
+                    tasks.append(
+                        p.submit(
+                            functools.partial(
+                                json_entry_point,
+                                copy.deepcopy(mod), include, workers
+                            )
+                        )
+                    )
+                else:
+                    logger.error(f"Unsupported automation file schema: {include}")
 
 
-def patch_automation(patch_include: str):
-    logger.info(f"Running patch script {patch_include}...")
-    logger.info(f"Executed patch script {patch_include}")
+def csv_entry_point(mod: Mod, csv_path: str):
+    try:
+        asyncio.run(target_import_csv.target_import_automation_csv(mod, csv_path))
+    except (
+        OSError, 
+        ValueError, 
+        subprocess.CalledProcessError,
+        NotImplementedError
+    ) as err:
+        logger.error(err)
+
+
+def json_entry_point(mod: Mod, json_path: str, workers: int):
+    try:
+        asyncio.run(target_import_json
+                    .target_import_automation_json(mod, json_path, workers))
+    except (
+        OSError, 
+        json.JSONDecodeError
+    ) as err:
+        logger.error(err)
 
 
 if __name__ == "__main__":
@@ -153,27 +204,36 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type = int, default = 8)
 
     args: argparse.Namespace = parser.parse_args(sys.argv[1:])
-
     archives, target_includes, patch_includes, isolated = to_safe(args)
 
     MAX_WORKER = args.workers
 
+    if os.path.exists(env.TMP):
+        shutil.rmtree(env.TMP)
+    os.mkdir(env.TMP)
+
     with Pool(MAX_WORKER) as p:
-        tasks: list[AsyncResult] = []
+        tasks: list[Future] = []
 
         if len(target_includes) > 0:
-            tasks.append(p.apply_async(
-                target_import_automation, 
-                (archives, target_includes, isolated, MAX_WORKER)
-            ))
+            binding = functools.partial(
+                target_import_automation,
+                archives, target_includes, isolated, MAX_WORKER
+            )
+            tasks.append(p.submit(binding))
 
         for patch_include in patch_includes:
-            tasks.append(p.apply_async(patch_automation, (patch_include,)))
+            binding = functools.partial(patch_automation_m.patch_automation, patch_include)
+            tasks.append(p.submit(binding))
         finished = 0
 
         while finished < len(tasks):
-            for result in tasks:
-                if not result.ready():
+            for task in tasks:
+                if not task.done():
                     continue
                 finished += 1
-                result.get()
+                err = task.exception()
+                if err != None:
+                    default_error_callback(err)
+
+    shutil.rmtree(env.TMP)
