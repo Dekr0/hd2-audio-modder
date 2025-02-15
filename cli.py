@@ -9,6 +9,7 @@ import os
 import shutil
 import posixpath as xpath
 
+from multiprocessing import freeze_support
 from concurrent.futures import ProcessPoolExecutor as Pool
 from concurrent.futures import Future
 
@@ -190,6 +191,8 @@ def json_entry_point(mod: Mod, json_path: str, workers: int):
 
 
 if __name__ == "__main__":
+    freeze_support()
+
     parser = argparse.ArgumentParser(
         prog = "Audio Modding Tool CLI" 
     )
