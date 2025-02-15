@@ -9,10 +9,7 @@ import fileutil
 from log import logger
 
 
-DIR = fileutil.to_posix(os.path.dirname(__file__))
-if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    DIR = fileutil.to_posix(os.path.dirname(sys.argv[0]))
-
+DIR = fileutil.to_posix(os.path.dirname(sys.argv[0]))
 CACHE = posixpath.join(DIR, ".cache")
 TMP = posixpath.join(DIR, ".tmp")
 
