@@ -6,7 +6,7 @@ from jsonschema import validate
 
 from log import logger
 
-from target_import_schema import \
+from backend.target_import_schema import \
         revert_all_schema, manifest_schema, target_import_pair_schema, \
         target_import_schema, task_schema
 

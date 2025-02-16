@@ -14,9 +14,9 @@ from concurrent.futures import ProcessPoolExecutor as Pool
 from concurrent.futures import Future
 
 import env
-import target_import_csv
-import target_import_json
-import patch_automation as patch_automation_m
+from backend import target_import_csv
+from backend import target_import_json
+from backend import patch_automation as patch_automation_m
 import ui.gui as gui
 from core import Mod
 from log import logger

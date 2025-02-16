@@ -3,7 +3,7 @@ import unittest
 from jsonschema import ValidationError
 from jsonschema import validate
 
-import patch_automate_schema
+from backend import patch_automate_schema
 
 from log import logger
 

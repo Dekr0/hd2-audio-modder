@@ -1,7 +1,7 @@
 import os
 import unittest
 
-import patch_automation
+from backend import patch_automation
 
 
 class TestPatchAutomation(unittest.TestCase):
