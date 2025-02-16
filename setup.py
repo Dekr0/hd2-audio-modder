@@ -2,13 +2,13 @@ from cx_Freeze import setup, Executable
 
 build_exe_options = {
     "excludes": [
-        "tkinter",
-        "unittest",
-        "watchdog",
         "pyinstaller",
         "pyinstaller-hooks-contrib",
-        "tkinterdnd2",
         "PyAudio"
+        "tkinter",
+        "tkinterdnd2",
+        "unittest",
+        "watchdog",
     ],
     "include_files": [
         "AudioConversionProject"
