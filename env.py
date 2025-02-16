@@ -9,7 +9,7 @@ import fileutil
 from log import logger
 
 
-DIR = fileutil.to_posix(os.path.dirname(sys.argv[0]))
+DIR = fileutil.to_posix(os.path.dirname(sys.argv[0]), True)
 CACHE = posixpath.join(DIR, ".cache")
 TMP = posixpath.join(DIR, ".tmp")
 
