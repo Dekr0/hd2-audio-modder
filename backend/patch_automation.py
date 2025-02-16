@@ -12,9 +12,9 @@ from typing import Any
 
 import env
 import fileutil
-import target_import_csv
-import target_import_json
-import patch_automate_schema
+from backend import target_import_csv
+from backend import target_import_json
+from backend import patch_automate_schema
 
 from log import logger
 

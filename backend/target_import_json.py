@@ -11,7 +11,7 @@ from concurrent.futures import ProcessPoolExecutor as Pool
 from concurrent.futures import Future
 from typing import Any
 
-import target_import_schema
+from backend import target_import_schema
 
 from env import DEFAULT_WWISE_PROJECT
 from core import Mod
