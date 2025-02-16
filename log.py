@@ -31,6 +31,11 @@ def get_logger():
         
         logger.addHandler(default_file_handler)
         logger.addHandler(default_stream_handler)
+        file_handler = logging.FileHandler("log.txt")
+        stderr_handler = logging.StreamHandler()
+
+        logger.addHandler(file_handler)
+        logger.addHandler(stderr_handler)
 
         return logger
 
