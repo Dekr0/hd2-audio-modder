@@ -17,6 +17,7 @@ import env
 import target_import_csv
 import target_import_json
 import patch_automation as patch_automation_m
+import ui.gui as gui
 from core import Mod
 from log import logger
 
@@ -190,9 +191,7 @@ def json_entry_point(mod: Mod, json_path: str, workers: int):
         logger.error(err)
 
 
-if __name__ == "__main__":
-    freeze_support()
-
+def cli():
     parser = argparse.ArgumentParser(
         prog = "Audio Modding Tool CLI" 
     )
@@ -210,10 +209,6 @@ if __name__ == "__main__":
     archives, target_includes, patch_includes, isolated = to_safe(args)
 
     MAX_WORKER = args.workers
-
-    if os.path.exists(env.TMP):
-        shutil.rmtree(env.TMP)
-    os.mkdir(env.TMP)
 
     with Pool(MAX_WORKER) as p:
         tasks: list[Future] = []
@@ -239,4 +234,20 @@ if __name__ == "__main__":
                 if err != None:
                     default_error_callback(err)
 
-    shutil.rmtree(env.TMP)
+
+if __name__ == "__main__":
+    freeze_support()
+
+    if os.path.exists(env.TMP):
+        shutil.rmtree(env.TMP)
+    os.mkdir(env.TMP)
+
+    if len(sys.argv) <= 1:
+        gui.init()
+    else: 
+        cli()
+
+    try:
+        shutil.rmtree(env.TMP)
+    except OSError as err:
+        logger.error(err)
