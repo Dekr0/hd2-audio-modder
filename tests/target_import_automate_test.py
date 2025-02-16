@@ -2,8 +2,8 @@ import os
 import posixpath as xpath
 import unittest
 
-from target_import_csv import target_import_automation_csv
-from target_import_json import target_import_automation_json
+from backend.target_import_csv import target_import_automation_csv
+from backend.target_import_json import target_import_automation_json
 from core import Mod
 from env import get_data_path
 
