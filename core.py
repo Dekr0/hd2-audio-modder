@@ -2456,6 +2456,7 @@ class ModHandler:
 
     def add_new_mod(self, mod_name: str, mod: Mod):
         """
+        @exception
         - KeyError
         """
         if mod_name in self.mods:
