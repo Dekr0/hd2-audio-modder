@@ -14,19 +14,22 @@ class TestPatchAutomateSchema(unittest.TestCase):
         logger.info("Running patch_task_schema test (passing)...")
         test_cases = [
             {
-                "archive_files": [ "123", "234" ],
+                "archives": [ "123", "234" ],
                 "workspace": "",
-                "using": [ "manifest_1.json", "manifest_2.json" ]
+                "includes": [ "manifest_1.json", "manifest_2.json" ],
+                "merge": False,
             },
             {
-                "using": [ "manifest_2.json", "manifest_3.json" ],
+                "includes": [ "manifest_2.json", "manifest_3.json" ],
                 "workspace": "",
-                "archive_files": [ "123" ]
+                "archives": [ "123" ],
+                "merge": True,
             },
             {
-                "using": [ "manifest_3.json" ],
+                "includes": [ "manifest_3.json" ],
                 "workspace": "",
-                "archive_files": [ "123" ]
+                "archives": [ "123" ],
+                "merge": False,
             }
         ]
         for test_case in test_cases:
@@ -38,25 +41,35 @@ class TestPatchAutomateSchema(unittest.TestCase):
         test_cases = [
             # Missing workspace
             {
-                "using": [ "manifest_3.json" ],
-                "archive_files": [ "123" ]
+                "includes": [ "manifest_3.json" ],
+                "archives": [ "123" ],
+                "merge": False,
             },
-            # Missing using
+            # Missing includes
             {
                 "workspace": "",
-                "archive_files": [ "123" ]
+                "archives": [ "123" ],
+                "merge": False,
             },
             # Empty archive file
             {
                 "workspace": "",
-                "using": [ "manifest_2.json", "manifest_3.json" ],
-                "archive_files": []
+                "includes": [ "manifest_2.json", "manifest_3.json" ],
+                "archives": [],
+                "merge": False,
             },
-            # Empty using 
+            # Empty includes 
             {
                 "workspace": "",
-                "using": [  ],
-                "archive_files": [ "123" ]
+                "includes": [  ],
+                "archives": [ "123" ],
+                "merge": False,
+            },
+            # Missing merge
+            {
+                "archives": [ "123", "234" ],
+                "workspace": "",
+                "includes": [ "manifest_1.json", "manifest_2.json" ],
             },
         ]
         for test_case in test_cases:
@@ -74,8 +87,9 @@ class TestPatchAutomateSchema(unittest.TestCase):
                 "tasks": [
                     {
                         "workspace": "",
-                        "archive_files": [ "123", "234" ],
-                        "using": [ "target_import_manifest_1.json", "target_import_manifest_2.json" ]
+                        "archives": [ "123", "234" ],
+                        "includes": [ "target_import_manifest_1.json", "target_import_manifest_2.json" ],
+                        "merge": False
                     }
                 ]
             },
@@ -84,8 +98,9 @@ class TestPatchAutomateSchema(unittest.TestCase):
                 "tasks": [
                     {
                         "workspace": "",
-                        "using": [ "manifest_3.json" ],
-                        "archive_files": [ "123" ]
+                        "includes": [ "manifest_3.json" ],
+                        "archives": [ "123" ],
+                        "merge": False
                     }
                 ]
             },
@@ -93,9 +108,10 @@ class TestPatchAutomateSchema(unittest.TestCase):
                 "version": patch_automate_schema.VERSION,
                 "tasks": [
                     {
-                        "using": [ "manifest_2.json", "manifest_3.json" ],
-                        "archive_files": [ "123" ],
-                        "workspace": ""
+                        "includes": [ "manifest_2.json", "manifest_3.json" ],
+                        "archives": [ "123" ],
+                        "workspace": "",
+                        "merge": False
                     },
                 ]
             }

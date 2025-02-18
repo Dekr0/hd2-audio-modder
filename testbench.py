@@ -18,6 +18,7 @@ from tests.parser_integration_test import TestParserIntegration
 # from tests.patch_automate_schema_test import TestPatchAutomateSchema
 # from tests.target_import_schema_test import TestTargetImportSchema
 # from tests.target_import_automate_test import TargetImportAutomateTest
+# from tests.patch_automate_task_test import TestPatchAutomation
 
 
 if __name__ == "__main__":
