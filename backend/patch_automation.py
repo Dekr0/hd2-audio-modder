@@ -73,7 +73,7 @@ def patch_automation_task(workers: int, task: dict):
     """
     @exception (in order)
     """
-    archives, includes = validate_task(task)
+    archives, includes, templates = validate_task(task)
 
     if task["merge"]:
         mod = Mod("")
@@ -84,6 +84,9 @@ def patch_automation_task(workers: int, task: dict):
                 logger.error(err)
             except BaseException as err:
                 logger.critical(f"Unhandle exception: {err}")
+
+        for template in templates:
+            mod.import_patch(template)
 
         with Pool(workers) as p:
             tasks: list[Future] = []
@@ -105,7 +108,7 @@ def patch_automation_task(workers: int, task: dict):
             for archive in archives:
                 binding = functools.partial(
                     patch_automation_target_import_split,
-                    archive, includes, workers
+                    archive, includes, templates, workers
                 )
                 tasks.append(p.submit(binding))
 
@@ -123,7 +126,8 @@ def patch_automation_task(workers: int, task: dict):
 def patch_automation_target_import_split(
     archive_file: str, 
     includes: set[str], 
-    workers: int
+    templates: list[str],
+    workers: int,
 ):
     """
     @exception
@@ -132,6 +136,8 @@ def patch_automation_target_import_split(
     mod = Mod("")
 
     mod.load_archive_file(archive_file)
+    for template in templates:
+        mod.import_patch(template)
 
     with Pool(workers) as p:
         tasks: list[Future] = []
@@ -174,7 +180,7 @@ def json_entry_point(mod: Mod, manifest_path: str, workers: int):
         logger.error(err)
 
 
-def validate_task(task: dict) -> tuple[set[str], set[str]]:
+def validate_task(task: dict) -> tuple[set[str], set[str], list[str]]:
     """
     @exception
     - OSError
@@ -234,4 +240,30 @@ def validate_task(task: dict) -> tuple[set[str], set[str]]:
     if len(includes) <= 0:
         raise ValueError("No target import automation manifest is provided.")
 
-    return archives, includes
+    templates: list[str] = [] 
+    if "templates" in task:
+        templates = task["templates"]
+        if not isinstance(templates, list):
+            raise AssertionError("jsonschema validation malformed")
+
+        for template in templates:
+            if not isinstance(template, str):
+                raise AssertionError("jsonschema validation malformed")
+
+            if not xpath.isabs(template):
+                template = xpath.join(workspace, template)
+                if not os.path.exists(template):
+                    logger.error(
+                        f"The provided template patch {template} does not exist."
+                    )
+                else:
+                    templates.append(template)
+            else:
+                if not os.path.exists(template):
+                    logger.error(
+                        f"The provided template patch {template} does not exist."
+                    )
+                else:
+                    templates.append(template)
+
+    return archives, includes, templates
