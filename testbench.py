@@ -13,11 +13,12 @@ from tests.parser_integration_test import TestParserIntegration
 # from tests.event_parser_test import TestEventParser
 # from tests.action_parser_test import TestActionParser
 # from tests.mediautil_test import TestMediaUtil
-# from tests.mediautil_test import TestMediaUtil
 # from tests.mod_test import TestMod
+# from tests.sound_handler_test import TestSoundHandler
 
 
 if __name__ == "__main__":
+    if os.path.exists(TMP):
+        shutil.rmtree(TMP)
     os.mkdir(TMP)
     unittest.main()
-    shutil.rmtree(TMP)
