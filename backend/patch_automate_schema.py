@@ -39,6 +39,15 @@ task: Schema = {
             },
             "minItems": 1
         },
+        "templates": {
+            "description": "A list of patch file that serves as a template for "
+                           "generating a new patch. This is useful when "
+                           "automating sound bank editing.",
+            "items": {
+                "type": "string"
+            },
+            "minItems": 1
+        },
         "merge": {
             "description": "Load all archive files into a single mod or load "
                            "each archive into individual mod.",
