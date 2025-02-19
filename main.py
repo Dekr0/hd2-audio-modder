@@ -17,7 +17,6 @@ import env
 from backend import target_import_csv
 from backend import target_import_json
 from backend import patch_automation as patch_automation_m
-import ui.gui as gui
 from core import Mod
 from log import logger
 
@@ -243,7 +242,7 @@ if __name__ == "__main__":
     os.mkdir(env.TMP)
 
     if len(sys.argv) <= 1:
-        gui.init()
+        pass
     else: 
         cli()
 
