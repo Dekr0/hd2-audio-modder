@@ -27,7 +27,7 @@ def get_logger():
 
         logger = logging.getLogger()
 
-        logger.setLevel(logging.CRITICAL)
+        logger.setLevel(logging.INFO)
         
         logger.addHandler(default_file_handler)
         logger.addHandler(default_stream_handler)
