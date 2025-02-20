@@ -85,16 +85,13 @@ def patch_automation_task(workers: int, task: dict):
             except BaseException as err:
                 logger.critical(f"Unhandle exception: {err}")
 
-        for template in templates:
-            mod.import_patch(template)
-
         with Pool(workers) as p:
             tasks: list[Future] = []
             for include in includes:
                 _, ext = os.path.splitext(include) 
                 if ext == ".csv":
                     binding = functools.partial(
-                        csv_entry_point, copy.deepcopy(mod), include
+                        csv_entry_point, copy.deepcopy(mod), include, templates
                     )
                     tasks.append(p.submit(binding))
                 elif ext == ".json":
@@ -136,8 +133,6 @@ def patch_automation_target_import_split(
     mod = Mod("")
 
     mod.load_archive_file(archive_file)
-    for template in templates:
-        mod.import_patch(template)
 
     with Pool(workers) as p:
         tasks: list[Future] = []
@@ -145,7 +140,7 @@ def patch_automation_target_import_split(
             _, ext = os.path.splitext(include) 
             if ext == ".csv":
                 binding = functools.partial(
-                    csv_entry_point, copy.deepcopy(mod), include
+                    csv_entry_point, copy.deepcopy(mod), include, templates
                 )
                 tasks.append(p.submit(binding))
             elif ext == ".json":
@@ -165,9 +160,9 @@ def patch_automation_target_import_split(
                     default_error_callback(err)
         
 
-def csv_entry_point(mod: Mod, csv_path: str):
+def csv_entry_point(mod: Mod, csv_path: str, templates: list[str]):
     try:
-        asyncio.run(target_import_csv.target_import_automation_csv(mod, csv_path))
+        asyncio.run(target_import_csv.target_import_automation_csv(mod, csv_path, templates))
     except OSError as err:
         logger.error(err)
 
@@ -240,30 +235,30 @@ def validate_task(task: dict) -> tuple[set[str], set[str], list[str]]:
     if len(includes) <= 0:
         raise ValueError("No target import automation manifest is provided.")
 
-    templates: list[str] = [] 
+    safe_templates: list[str] = [] 
     if "templates" in task:
-        templates = task["templates"]
-        if not isinstance(templates, list):
+        unsafe_templates = task["templates"]
+        if not isinstance(unsafe_templates, list):
             raise AssertionError("jsonschema validation malformed")
 
-        for template in templates:
+        for template in unsafe_templates:
             if not isinstance(template, str):
                 raise AssertionError("jsonschema validation malformed")
 
-            if not xpath.isabs(template):
+            if not os.path.isabs(template):
                 template = xpath.join(workspace, template)
                 if not os.path.exists(template):
                     logger.error(
                         f"The provided template patch {template} does not exist."
                     )
                 else:
-                    templates.append(template)
+                    safe_templates.append(template)
             else:
                 if not os.path.exists(template):
                     logger.error(
                         f"The provided template patch {template} does not exist."
                     )
                 else:
-                    templates.append(template)
+                    safe_templates.append(template)
 
-    return archives, includes, templates
+    return archives, includes, safe_templates

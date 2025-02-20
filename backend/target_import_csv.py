@@ -8,7 +8,7 @@ from core import Mod
 from log import logger
 
 
-async def target_import_automation_csv(mod: Mod, csv_path: str):
+async def target_import_automation_csv(mod: Mod, csv_path: str, templates: list[str] = []):
     """
     @params
     - mod
@@ -29,6 +29,9 @@ async def target_import_automation_csv(mod: Mod, csv_path: str):
 
     mod.revert_all()
 
+    for template in templates:
+        mod.import_patch(template)
+
     workspace = xpath.dirname(csv_path)
     output = workspace
 
@@ -46,7 +49,7 @@ async def target_import_automation_csv(mod: Mod, csv_path: str):
                     )
                 else:
                     overwrite_workspace = row[1]
-                    if not xpath.isabs(overwrite_workspace):
+                    if not os.path.isabs(overwrite_workspace):
                         overwrite_workspace = fileutil.to_posix(
                             overwrite_workspace, True
                         )
@@ -64,9 +67,15 @@ async def target_import_automation_csv(mod: Mod, csv_path: str):
                     )
                 else:
                     overwrite_output = row[1]
-                    if not xpath.isabs(overwrite_output):
+                    if not os.path.isabs(overwrite_output):
                         overwrite_output = fileutil.to_posix(overwrite_output, True)
-                    output = overwrite_output
+                    if os.path.exists(overwrite_output):
+                        output = overwrite_output
+                    else:
+                        logger.warning(
+                            f"The provided workspace {overwrite_output} does "
+                             "not exists."
+                        )
             else:
                 try:
                     from_file, targets = validate_target_import_csv_row(
