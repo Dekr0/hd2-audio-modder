@@ -1,10 +1,25 @@
 import os
 import struct
+import subprocess
 
 from ctypes import c_uint32
+from itertools import takewhile
 from math import ceil
 from typing import Any
-from itertools import takewhile
+
+from env import SYS_CLIPBOARD
+
+
+def copy_to_clipboard(buffer: str):
+    """
+    @exception
+    - CalledProcessError
+    """
+    subprocess.run(
+            SYS_CLIPBOARD,
+            universal_newlines=True,
+            input=buffer).check_returncode()
+
 
 class MemoryStream:
     '''
