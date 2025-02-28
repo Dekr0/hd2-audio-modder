@@ -11,7 +11,7 @@ __pycache__/
 **/.tmp
 **/.venv
 **/.vscode
-**/database
+**/database*
 **/log.txt
 **/*.pickle
-**/database*
+**/*.patch_*
