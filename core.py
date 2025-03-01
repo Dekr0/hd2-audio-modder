@@ -467,7 +467,6 @@ class TextBank:
 
 class GameArchive:
 
-    
     def __init__(self):
         self.magic: int = -1
         self.name: str = ""
@@ -1373,6 +1372,27 @@ class Mod:
         for audio in self.get_wwise_bank(soundbank_id).get_content():
             audio.revert_modifications()
 
+    async def reroute_sound_wav(self, pairs: dict[str, list[Sound]]):
+        if len(pairs) <= 0:
+            return
+
+        wav_wem = await mediautil.convert_wav_to_wem(list(pairs.keys()))
+        if wav_wem == None:
+            raise AssertionError(
+                "Wave to Wise encode media conversion return None!"
+            )
+
+        for wav, sound in pairs.items():
+            if wav not in wav_wem:
+                raise AssertionError(
+                    f"{wav} does not have a Wwise encoded media conversion "
+                     "output."
+                )
+            with open(wav_wem[wav], "rb") as f:
+                data = bytearray(f.read())
+                for sound in pairs[wav]:
+                    self.reroute_sound(sound, data)
+
     def reroute_sound(self, sound: Sound, audio_data: bytearray):
         """
         @exception
@@ -1410,6 +1430,8 @@ class Mod:
         audio_source.stream_type = BANK
 
         # Update BankSourceStruct
+        source_struct.stream_type = BANK
+        source_struct.mem_size = len(audio_data)
         source_struct.source_id = short_id
 
         # Mark sound is modified
