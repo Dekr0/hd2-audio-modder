@@ -94,8 +94,10 @@ async def convert_wav_to_wem(
     """
     if not os.path.exists(wwise_project):
         raise OSError(f"Wwise project {wwise_project} does not exists.")
+
     if len(wavs) <= 0:
         return None
+
     if SYSTEM not in WWISE_SUPPORTED_SYSTEMS:
         raise NotImplementedError(
             "The current operating system does not support this feature."
