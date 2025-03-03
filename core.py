@@ -1306,8 +1306,7 @@ class SoundHandler:
 
 class Mod:
 
-    def __init__(self, name: str, db: SQLiteDatabase):
-        self.db = db
+    def __init__(self, name: str):
         self.wwise_streams: dict[int, WwiseStream] = {}
         self.stream_count: dict[int, int] = {}
         self.wwise_banks: dict[int, WwiseBank] = {}
@@ -1372,7 +1371,11 @@ class Mod:
         for audio in self.get_wwise_bank(soundbank_id).get_content():
             audio.revert_modifications()
 
-    async def reroute_sound_wav(self, pairs: dict[str, list[Sound]]):
+    async def reroute_sound_wav(
+        self,
+        pairs: dict[str, list[Sound]],
+        db: SQLiteDatabase
+    ):
         if len(pairs) <= 0:
             return
 
@@ -1391,9 +1394,14 @@ class Mod:
             with open(wav_wem[wav], "rb") as f:
                 data = bytearray(f.read())
                 for sound in pairs[wav]:
-                    self.reroute_sound(sound, data)
+                    self.reroute_sound(sound, data, db)
 
-    def reroute_sound(self, sound: Sound, audio_data: bytearray):
+    def reroute_sound(
+        self,
+        sound: Sound,
+        audio_data: bytearray,
+        db: SQLiteDatabase
+    ):
         """
         @exception
         - AssertionError
@@ -1413,7 +1421,7 @@ class Mod:
                f" {source_struct.plugin_id}."
             )
         
-        short_id = ak_media_id(self.db)
+        short_id = ak_media_id(db)
         if short_id in self.audio_sources:
             raise KeyError(
                 f"Audio source short ID {short_id} already exists. Please retry "
@@ -2467,18 +2475,17 @@ class ModHandler:
     
     handler_instance: Union['ModHandler', None] = None
     
-    def __init__(self, db: SQLiteDatabase):
-        self.db = db
+    def __init__(self):
         self.mods: dict[str, Mod] = {}
         
     @classmethod
-    def create_instance(cls, db: SQLiteDatabase):
-        cls.handler_instance = ModHandler(db)
+    def create_instance(cls):
+        cls.handler_instance = ModHandler()
         
     @classmethod
-    def get_instance(cls, db: SQLiteDatabase) -> 'ModHandler':
+    def get_instance(cls) -> 'ModHandler':
         if cls.handler_instance == None:
-            cls.handler_instance = ModHandler(db)
+            cls.handler_instance = ModHandler()
         return cls.handler_instance
 
     def add_new_mod(self, mod_name: str, mod: Mod):
@@ -2498,7 +2505,7 @@ class ModHandler:
         """
         if mod_name in self.mods.keys():
             raise KeyError(f"Mod name '{mod_name}' already exists!")
-        new_mod = Mod(mod_name, self.db)
+        new_mod = Mod(mod_name)
         self.mods[mod_name] = new_mod
         self.active_mod = new_mod
         return new_mod
