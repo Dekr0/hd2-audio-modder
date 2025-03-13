@@ -19,6 +19,7 @@ from tests.parser_integration_test import TestParserIntegration
 # from tests.target_import_schema_test import TestTargetImportSchema
 # from tests.target_import_automate_test import TargetImportAutomateTest
 # from tests.patch_automate_task_test import TestPatchAutomation
+from tests.reroute_sound_test import TestRerouteSound
 
 
 if __name__ == "__main__":
