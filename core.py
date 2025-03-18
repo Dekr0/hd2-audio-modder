@@ -690,36 +690,33 @@ class GameArchive:
                     pass
 
                 replacements = {}
-                for hirc_id, hirc_entry in hirc.entries.items():
-                    if hirc_id not in self.hierarchy_entries:
-                        self.hierarchy_entries[hirc_id] = hirc_entry
+                for new_hirc_id, new_hirc_entry in hirc.entries.items():
+                    if new_hirc_id not in self.hierarchy_entries:
+                        self.hierarchy_entries[new_hirc_id] = new_hirc_entry
                         continue
 
-                    existing_hirc_entry = self.hierarchy_entries[hirc_id]
-                    if not isinstance(hirc_entry, ActorMixer):
-                        continue
+                    existing_hirc_entry = self.hierarchy_entries[new_hirc_id]
+                    if isinstance(new_hirc_entry, ActorMixer):
+                        if not isinstance(existing_hirc_entry, ActorMixer): 
+                            raise AssertionError(
+                                f"Both hierarchy entry with id {new_hirc_id} but one "
+                                f"has type of {new_hirc_entry.__class__.__name__} and "
+                                f"one has type of {existing_hirc_entry.__class__.__name__}."
+                            )
+                        for child in new_hirc_entry.children.children:
+                            if child in existing_hirc_entry.children.children:
+                                continue
 
-                    if not isinstance(existing_hirc_entry, ActorMixer): 
-                        raise AssertionError(
-                            f"Both hierarchy entry with id {hirc_id} but one "
-                            f"has type of {hirc_entry.__class__.__name__} and "
-                            f"one has type of {hirc_entry.__class__.__name__}."
-                        )
+                            existing_hirc_entry.children.children.append(child)
+                            existing_hirc_entry.children.numChildren += 1
+                        existing_hirc_entry.update_size()
 
-                    for child in hirc_entry.children.children:
-                        if child in existing_hirc_entry.children.children:
-                            continue
-
-                        existing_hirc_entry.children.children.append(child)
-                        existing_hirc_entry.children.numChildren += 1
-
-                    existing_hirc_entry.update_size()
                     existing_hirc_entry.soundbanks.append(wwise_bank)
-                    replacements[hirc_id] = existing_hirc_entry
+                    replacements[new_hirc_id] = existing_hirc_entry
 
-                for hirc_id, hirc_entry in replacements.items():
-                    hirc._remove_categorized_entry(hirc.entries[hirc_id])
-                    hirc._categorized_entry(hirc_entry)
+                for new_hirc_id, new_hirc_entry in replacements.items():
+                    hirc._remove_categorized_entry(hirc.entries[new_hirc_id])
+                    hirc._categorized_entry(new_hirc_entry)
                 hirc.entries.update(replacements)
 
                 wwise_bank.hierarchy = hirc
@@ -1659,8 +1656,8 @@ class Mod:
         self.game_archives[key] = game_archive
         
         replacements: dict[int, HircEntry] = {}
-        hirc = game_archive.get_hierarchy_entries()
-        for new_hirc_id, new_hirc_entry in hirc.items():
+        entries = game_archive.get_hierarchy_entries()
+        for new_hirc_id, new_hirc_entry in entries.items():
             if new_hirc_id not in self.hierarchy_entries:
                 self.hierarchy_count[new_hirc_id] = 1
                 self.hierarchy_entries[new_hirc_id] = new_hirc_entry
@@ -1680,7 +1677,7 @@ class Mod:
                         f"one has type of {existing_hirc_entry.__class__.__name__}."
                     )
 
-                for child in existing_hirc_entry.children.children:
+                for child in new_hirc_entry.children.children:
                     if child not in existing_hirc_entry.children.children:
                         existing_hirc_entry.children.children.append(child)
                         existing_hirc_entry.children.numChildren += 1
@@ -1696,17 +1693,18 @@ class Mod:
                     existing_hirc_entry.soundbanks.append(bank)
 
         # update in each soundbank hierarchy's type lists, each soundbank hierarchy, and then GameArchive
-        for bank in game_archive.wwise_banks.values():
+        for new_bank in game_archive.wwise_banks.values():
             assert_not_none(
-                f"WwiseBank {bank.file_id} has no hierarchy",
-                bank.hierarchy
+                f"WwiseBank {new_bank.file_id} has no hierarchy",
+                new_bank.hierarchy
             )
 
-            hirc = bank.hierarchy
+            hirc = new_bank.hierarchy
             for new_hirc_id, new_hirc_entry in replacements.items():
-                if not hirc.has_entry(new_hirc_id): # type: ignore
+                if new_hirc_id not in hirc.entries: # type: ignore
                     continue
                 hirc._remove_categorized_entry(hirc.entries[new_hirc_id]) # type: ignore
+                hirc._categorized_entry(new_hirc_entry) # type: ignore
                 hirc.entries[new_hirc_id] = new_hirc_entry # type: ignore
 
         game_archive.get_hierarchy_entries().update(replacements)
