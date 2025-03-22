@@ -1,3 +1,4 @@
+from uuid import uuid4
 import aiofiles
 import asyncio
 import functools
@@ -5,6 +6,7 @@ import numpy
 import os
 import pyaudio
 import subprocess
+import shutil
 import struct
 import wave
 import copy
@@ -1897,7 +1899,7 @@ class Mod:
             try:
                 async with aiofiles.open(file_path, "rb") as f:
                     audio_data = await f.read()
-                    if audio_data[20:22] == b"\xFF\xFF":
+                    if audio_data[20:22] != b"\xFF\xFF":
                         error_files.append((
                             file_path, 
                             f"Wem file {file_path} has incorrect audio format."
@@ -1977,8 +1979,12 @@ class Mod:
                 "The current operating system does not support this feature."
             )
 
+        workspace = xpath.join(TMP, f"{fnv_30(uuid4().bytes)}")
+        os.mkdir(xpath.join(workspace))
+
         convert_dest = await mediautil.convert_wav_to_wem(
             list(wavs.keys()),
+            workspace,
             wwise_project,
             conversion_setting
         )
@@ -1998,15 +2004,7 @@ class Mod:
 
         error_files = await self.import_wems(wems)
 
-        with ProcessPoolExecutor() as p:
-            fs: list[Future[None]] = [
-                p.submit(functools.partial(os.remove, wem)) for wem in wems.keys()
-            ]
-            for f in as_completed(fs, 60.0):
-                # as_completed yield done Future
-                err = f.exception()
-                if err != None:
-                    logger.error(err)
+        shutil.rmtree(workspace)
 
         return error_files
             
@@ -2037,7 +2035,10 @@ class Mod:
                     others[file] = targets
 
         error_files: list[tuple[str, str]] = []
-        results = await mediautil.to_wave_batch(others.keys())
+
+        workspace = xpath.join(TMP, f"{fnv_30(uuid4().bytes)}")
+
+        results = await mediautil.to_wave_batch(others.keys(), workspace)
         for result in results:
             if result[2] != 0:
                 error_files.append((
