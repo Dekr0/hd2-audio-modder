@@ -3,27 +3,24 @@ import locale
 import os
 import posixpath as xpath 
 import subprocess
-from uuid import uuid4
 import xml.etree.ElementTree as etree
 
 from collections.abc import Iterable
 from subprocess import CalledProcessError
 
 from const import DEFAULT_CONVERSION_SETTING, WWISE_SUPPORTED_SYSTEMS
-from env import DEFAULT_WWISE_PROJECT, VGMSTREAM, SYSTEM, TMP, WWISE_CLI
+from env import DEFAULT_WWISE_PROJECT, VGMSTREAM, SYSTEM, WWISE_CLI
 from log import logger
 from fileutil import to_posix
-from util import fnv_30
 
 
-async def to_wav(file_path: str):
+async def to_wav(file_path: str, workspace: str):
     if not os.path.exists(file_path):
         raise OSError(f"Wave file {file_path} does not exists.")
 
     file_path = to_posix(file_path)
-    namespace = fnv_30(uuid4().bytes)
     file_path_wave = xpath.join(
-        TMP, f"{xpath.splitext(xpath.basename(file_path))[0]}_{namespace}.wav"
+        workspace, f"{xpath.splitext(xpath.basename(file_path))[0]}.wav"
     )
 
     proc = await asyncio.subprocess.create_subprocess_exec(
@@ -37,9 +34,9 @@ async def to_wav(file_path: str):
     return file_path, file_path_wave, rcode 
 
 
-async def to_wave_batch(file_paths: Iterable[str]):
+async def to_wave_batch(file_paths: Iterable[str], workspace: str):
     result = await asyncio.gather(
-        *[to_wav(file_path) for file_path in file_paths]
+        *[to_wav(file_path, workspace) for file_path in file_paths]
     )
     return result
 
@@ -59,8 +56,11 @@ async def wwise_project_migration(wwise_project: str):
 
 async def wwise_conversion(
     source_list: str, 
+    workspace: str,
     wwise_project: str = DEFAULT_WWISE_PROJECT
 ):
+    if not os.path.exists(workspace):
+        raise OSError(f"Workspace {workspace} does not exists.")
     if not os.path.exists(wwise_project):
         raise OSError(f"Wwise project {wwise_project} does not exists.")
     if not os.path.exists(source_list):
@@ -71,7 +71,7 @@ async def wwise_conversion(
             WWISE_CLI, "convert-external-source", wwise_project,
             "--platform", "Windows",
             "--source-file", source_list,
-            "--output", TMP,
+            "--output", workspace,
          ]
     )
 
@@ -82,6 +82,7 @@ async def wwise_conversion(
 
 async def convert_wav_to_wem(
     wavs: list[str], 
+    workspace: str,
     wwise_project: str = DEFAULT_WWISE_PROJECT,
     conversion_setting: str = DEFAULT_CONVERSION_SETTING
 ):
@@ -91,23 +92,25 @@ async def convert_wav_to_wem(
     - OSError
     - NotImplementedError
     """
+    if not os.path.exists(workspace):
+        raise OSError(f"Workspace {workspace} does not exists.")
     if not os.path.exists(wwise_project):
         raise OSError(f"Wwise project {wwise_project} does not exists.")
     if len(wavs) <= 0:
-        return None
+        raise ValueError(f"No wave files are provided.")
     if SYSTEM not in WWISE_SUPPORTED_SYSTEMS:
         raise NotImplementedError(
             "The current operating system does not support this feature."
         )
-    source_list = create_external_sources_list(wavs, conversion_setting)
+    source_list = create_external_sources_list(wavs, workspace, conversion_setting)
 
     rcode = await wwise_project_migration(wwise_project)
     if rcode != 0:
         raise CalledProcessError(rcode, f"{WWISE_CLI} migrate")
 
-    convert_dest = xpath.join(TMP, SYSTEM)
+    convert_dest = xpath.join(workspace, SYSTEM)
 
-    rcode = await wwise_conversion(source_list, wwise_project)
+    rcode = await wwise_conversion(source_list, workspace, wwise_project)
     if rcode != 0:
         raise CalledProcessError(rcode, f"{WWISE_CLI} convert-external-source")
 
@@ -188,6 +191,7 @@ def get_wem_length_sync(file_path: str):
 
 def create_external_sources_list(
     sources: Iterable[str], 
+    workspace: str,
     conversion_setting: str = DEFAULT_CONVERSION_SETTING
 ):
     root = etree.Element("ExternalSourcesList", attrib={
@@ -204,6 +208,8 @@ def create_external_sources_list(
             "Destination": xpath.basename(source)
         })
 
-    file.write(xpath.join(TMP, "external_sources.wsources"))
+    file_path = xpath.join(workspace, "external_sources.wsources")
+
+    file.write(file_path)
     
-    return xpath.join(TMP, "external_sources.wsources")
+    return file_path
