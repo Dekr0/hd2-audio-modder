@@ -1233,7 +1233,7 @@ class ActionSeek(Action):
             f"Unique exception list size does not match up # of action exception "
             f"in the list for ActionSeek {self.hierarchy_id}",
             self.ulExceptionListSize,
-            self.actionExceptionList
+            len(self.actionExceptionList)
         )
 
         data = self._pack()
@@ -1385,7 +1385,7 @@ def action_factory(t: int, s: MemoryStream) -> Action:
             return ActionSetState.from_memory_stream(s)
         case 0x1900:
             return ActionSetSwitch.from_memory_stream(s)
-        case 0x1E00:
+        case 0x1E03:
             return ActionSeek.from_memory_stream(s)
         case 0x2000:
             return ActionSetProp.from_memory_stream(s)
