@@ -697,7 +697,6 @@ class GameArchive:
                     if new_hirc_id not in self.hierarchy_entries:
                         self.hierarchy_entries[new_hirc_id] = new_hirc_entry
                         continue
-
                     existing_hirc_entry = self.hierarchy_entries[new_hirc_id]
                     if isinstance(new_hirc_entry, ActorMixer):
                         if not isinstance(existing_hirc_entry, ActorMixer): 
@@ -709,17 +708,16 @@ class GameArchive:
                         for child in new_hirc_entry.children.children:
                             if child in existing_hirc_entry.children.children:
                                 continue
-
                             existing_hirc_entry.children.children.append(child)
                             existing_hirc_entry.children.numChildren += 1
                         existing_hirc_entry.update_size()
-
                     existing_hirc_entry.soundbanks.append(wwise_bank)
                     replacements[new_hirc_id] = existing_hirc_entry
 
                 for new_hirc_id, new_hirc_entry in replacements.items():
                     hirc._remove_categorized_entry(hirc.entries[new_hirc_id])
                     hirc._categorized_entry(new_hirc_entry)
+
                 hirc.entries.update(replacements)
 
                 wwise_bank.hierarchy = hirc
@@ -755,9 +753,6 @@ class GameArchive:
 
         # Construct list of audio sources in each bank
         self._book_keep_audio_sources_per_bank()
-
-    def _combine_actor_mixer(self):
-        pass
 
     def _create_all_audio_source_objects(self, media_index: MediaIndex):
        for bank in self.wwise_banks.values():
@@ -1015,7 +1010,7 @@ class SoundHandler:
             except:
                 pass
             self.audio_process = None
-        
+    
     def play_audio(self, sound_id: int, sound_data: bytearray, callback: Callable | None = None):
         if not os.path.exists(VGMSTREAM):
             return
@@ -1673,9 +1668,7 @@ class Mod:
                 continue
 
             self.hierarchy_count[new_hirc_id] += 1
-
             existing_hirc_entry = self.hierarchy_entries[new_hirc_id]
-
             replacements[new_hirc_id] = existing_hirc_entry
 
             if isinstance(new_hirc_entry, ActorMixer):
@@ -1791,11 +1784,10 @@ class Mod:
                                 
         for new_audio in patch_game_archive.get_audio_sources().values():
             short_id = new_audio.short_id
-
             if short_id not in self.audio_sources:
                 continue
-            old_audio = self.audio_sources[short_id]
 
+            old_audio = self.audio_sources[short_id]
             new_audio_data = new_audio.get_data()
             if new_audio_data != old_audio.get_data():
                 continue
