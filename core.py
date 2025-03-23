@@ -1437,17 +1437,23 @@ class Mod:
             
     def get_audio_source(self, audio_id: int) -> AudioSource:
         """
+        @return
+        - Obtain audio source given by a Wwise audio short ID or a table of 
+        content file ID
+
         @exception
-        - KeyError
+        - KeyError - No audio source that matches up a Wwise audio short ID or 
+        a table of content file ID
         """
-        try:
-            return self.audio_sources[audio_id] #short_id
-        except KeyError:
-            pass
-        for source in self.audio_sources.values(): #resource_id
-            if source.resource_id == audio_id:
-                return source
-        raise KeyError(f"Cannot find audio source with id {audio_id}")
+        if audio_id in self.audio_sources:
+            return self.audio_sources[audio_id]
+
+        for audio_source in self.audio_sources.values():
+            if audio_source.resource_id == audio_id:
+                return audio_source
+
+        raise KeyError(f"Failed to find audio source with ID {audio_id}")
+
                 
     def get_string_entry(self, textbank_id: int, entry_id: int) -> StringEntry:
         """
@@ -1931,22 +1937,21 @@ class Mod:
                     have_length = False
 
             for target in targets:
-                if target not in self.audio_sources:
+                try:
+                    audio = self.get_audio_source(target)
+                    audio.set_data(bytearray(audio_data))
+                except KeyError as err:
                     error_files.append((
                         file_path,
-                        f"Target audio source {target} does not exists in the "
-                         "registered audio sources."
+                       f"Target audio source {target} does not exists in the "
+                        "registered audio sources."
                     ))
                     continue
-
-                audio: AudioSource = self.audio_sources[target] 
                 if not have_length:
                     continue
-
                 for item in audio.parents:
                     if not isinstance(item, MusicTrack):
                         continue
-
                     self.set_music_track_duration(item, audio, len_ms)
 
         return error_files
