@@ -12,7 +12,8 @@ from env import TMP
 # from tests.event_parser_test import TestEventParser
 # from tests.action_parser_test import TestActionParser
 # from tests.mediautil_test import TestMediaUtil
-from tests.mediautil_integration_test import TestMediaUtilIntegration
+# from tests.mediautil_integration_test import TestMediaUtilIntegration
+from tests.integration_test import TestIntegration
 
 if __name__ == "__main__":
     if os.path.exists(TMP):
