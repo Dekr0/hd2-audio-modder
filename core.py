@@ -284,7 +284,8 @@ class WwiseBank:
         
         added_sources = set()
 
-        entries: list[Sound | MusicTrack] = self.hierarchy.get_sounds() + self.hierarchy.get_music_tracks()
+        entries: list[Sound | MusicTrack] = list(self.hierarchy.get_sounds().values())
+        entries = list(self.hierarchy.get_music_tracks().values())
         for entry in entries:
             for source in entry.sources:
                 if source.plugin_id == VORBIS:
@@ -496,7 +497,7 @@ class GameArchive:
         self.audio_sources: dict[int, AudioSource] = {}
         self.hierarchy_entries: dict[int, HircEntry] = {}
         self.text_banks = {}
-    
+   
     @classmethod
     def from_file(cls, path: str) -> 'GameArchive': 
         archive = GameArchive()
@@ -650,7 +651,7 @@ class GameArchive:
         self.audio_sources.clear()
         self.text_banks.clear()
         self.hierarchy_entries.clear()
-        
+
         media_index = MediaIndex()
         
         self.magic      = toc_file.uint32_read()
@@ -692,31 +693,31 @@ class GameArchive:
                 except KeyError:
                     pass
 
-                replacements = {}
-                for new_hirc_id, new_hirc_entry in hirc.entries.items():
-                    if new_hirc_id not in self.hierarchy_entries:
-                        self.hierarchy_entries[new_hirc_id] = new_hirc_entry
+                replacements: dict[int, HircEntry] = {}
+                for in_hirc_id, in_hirc_entry in hirc.entries.items():
+                    if in_hirc_id not in self.hierarchy_entries:
+                        self.hierarchy_entries[in_hirc_id] = in_hirc_entry
                         continue
-                    existing_hirc_entry = self.hierarchy_entries[new_hirc_id]
-                    if isinstance(new_hirc_entry, ActorMixer):
+                    existing_hirc_entry = self.hierarchy_entries[in_hirc_id]
+                    if isinstance(in_hirc_entry, ActorMixer):
                         if not isinstance(existing_hirc_entry, ActorMixer): 
                             raise AssertionError(
-                                f"Both hierarchy entry with id {new_hirc_id} but one "
-                                f"has type of {new_hirc_entry.__class__.__name__} and "
+                                f"Both hierarchy entry with id {in_hirc_id} but one "
+                                f"has type of {in_hirc_entry.__class__.__name__} and "
                                 f"one has type of {existing_hirc_entry.__class__.__name__}."
                             )
-                        for child in new_hirc_entry.children.children:
+                        for child in in_hirc_entry.children.children:
                             if child in existing_hirc_entry.children.children:
                                 continue
                             existing_hirc_entry.children.children.append(child)
                             existing_hirc_entry.children.numChildren += 1
                         existing_hirc_entry.update_size()
                     existing_hirc_entry.soundbanks.append(wwise_bank)
-                    replacements[new_hirc_id] = existing_hirc_entry
+                    replacements[in_hirc_id] = existing_hirc_entry
 
-                for new_hirc_id, new_hirc_entry in replacements.items():
-                    hirc._remove_categorized_entry(hirc.entries[new_hirc_id])
-                    hirc._categorized_entry(new_hirc_entry)
+                for in_hirc_id, in_hirc_entry in replacements.items():
+                    hirc.remove_categorized_entry(hirc.entries[in_hirc_id])
+                    hirc.categorized_entry(in_hirc_entry)
 
                 hirc.entries.update(replacements)
 
@@ -769,7 +770,8 @@ class GameArchive:
         hirc = bank.hierarchy
         dep = bank.dep
 
-        entries_with_audio_sources = hirc.get_sounds() + hirc.get_music_tracks()
+        entries_with_audio_sources: list[Sound | MusicTrack] = list(hirc.get_sounds().values())
+        entries_with_audio_sources += list(hirc.get_music_tracks().values()) 
         for entry_with_audio_source in entries_with_audio_sources:
             for source_struct in entry_with_audio_source.sources:
                 audio_source = self._create_audio_source(
@@ -919,7 +921,7 @@ class GameArchive:
                 )
 
             bank_audio_sources = bank.get_content()
-            music_tracks = bank.hierarchy.get_music_tracks()
+            music_tracks = bank.hierarchy.get_music_tracks().values()
             for music_track in music_tracks:
                 for info in music_track.track_info:
                     source_id = info.source_id
@@ -949,7 +951,7 @@ class GameArchive:
                     if self.audio_sources[source_id] not in bank_audio_sources:
                         bank.add_content(self.audio_sources[source_id])
 
-            sounds = bank.hierarchy.get_sounds()
+            sounds = bank.hierarchy.get_sounds().values()
             for sound in sounds:
                 assert_equal(
                     "Sound object should only one single audio source but Sound "
@@ -1132,7 +1134,7 @@ class Mod:
     def revert_audio(self, file_id: int):
         audio = self.get_audio_source(file_id)
         audio.revert_modifications()
-        
+ 
     def add_new_hierarchy_entry(self, soundbank_id: int, entry: HircEntry):
         bank = self.get_wwise_bank(soundbank_id)
         if bank.hierarchy == None:
@@ -1162,8 +1164,7 @@ class Mod:
         else:
             del self.hierarchy_count[entry_id]
             del self.hierarchy_entries[entry_id]
-            
-        
+       
     def revert_hierarchy_entry(self, soundbank_id: int, entry_id: int):
         self.get_hierarchy_entry(entry_id).revert_modifications()
         
@@ -1647,7 +1648,7 @@ class Mod:
             del self.game_archives[archive_name]
         except:
             pass
-    
+
     def add_game_archive(self, game_archive: GameArchive):
         """
         @exception
@@ -1658,7 +1659,7 @@ class Mod:
             return
 
         self.game_archives[key] = game_archive
-        
+
         replacements: dict[int, HircEntry] = {}
         entries = game_archive.get_hierarchy_entries()
         for new_hirc_id, new_hirc_entry in entries.items():
@@ -1701,13 +1702,13 @@ class Mod:
                 new_bank.hierarchy
             )
 
-            hirc = new_bank.hierarchy
+            hirc: WwiseHierarchy = new_bank.hierarchy # type: ignore
             for new_hirc_id, new_hirc_entry in replacements.items():
-                if new_hirc_id not in hirc.entries: # type: ignore
+                if new_hirc_id not in hirc.entries:
                     continue
-                hirc._remove_categorized_entry(hirc.entries[new_hirc_id]) # type: ignore
-                hirc._categorized_entry(new_hirc_entry) # type: ignore
-                hirc.entries[new_hirc_id] = new_hirc_entry # type: ignore
+                hirc.remove_categorized_entry(hirc.entries[new_hirc_id])
+                hirc.categorized_entry(new_hirc_entry)
+                hirc.entries[new_hirc_id] = new_hirc_entry
 
         game_archive.get_hierarchy_entries().update(replacements)
         
