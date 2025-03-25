@@ -2091,16 +2091,16 @@ class WwiseHierarchy:
     def __init__(self, soundbank = None):
         self.entries: dict[int, HircEntry] = {}
 
-        self.actions: list[Action] = []
-        self.actor_mixers: list[ActorMixer] = []
-        self.events: list[Event] = []
-        self.layer_container: list[LayerContainer] = []
-        self.music_segments: list[MusicSegment] = []
-        self.music_tracks: list[MusicTrack] = []
-        self.random_sequence_containers: list[RandomSequenceContainer] = []
-        self.sounds: list[Sound] = []
-        self.switch_containers: list[SwitchContainer] = []
-        self.uncategorized: list[HircEntry] = []
+        self.actions: dict[int, Action] = {}
+        self.actor_mixers: dict[int, ActorMixer] = {}
+        self.events: dict[int, Event] = {}
+        self.layer_container: dict[int, LayerContainer] = {}
+        self.music_segments: dict[int, MusicSegment] = {}
+        self.music_tracks: dict[int, MusicTrack] = {}
+        self.random_sequence_containers: dict[int, RandomSequenceContainer] = {}
+        self.sounds: dict[int, Sound] = {}
+        self.switch_containers: dict[int, SwitchContainer] = {}
+        self.uncategorized: dict[int, HircEntry] = {}
 
         self.soundbank = soundbank # WwiseBank
         self.added_entries = {}
@@ -2117,7 +2117,7 @@ class WwiseHierarchy:
             entry.soundbanks.append(self.soundbank)
             self.entries[entry.get_id()] = entry
 
-            self._categorized_entry(entry)
+            self.categorized_entry(entry)
 
         for entry in self.entries.values():
             parent_id = entry.get_parent_id()
@@ -2140,7 +2140,7 @@ class WwiseHierarchy:
             for entry in self.removed_entries:
                 self.entries[entry.hierarchy_id] = entry
                 self.soundbank.lower_modified() # type: ignore
-                self._categorized_entry(entry)
+                self.categorized_entry(entry)
             self.removed_entries.clear()
             for entry in self.added_entries:
                 self.remove_entry(entry.hierarchy_id)
@@ -2154,7 +2154,7 @@ class WwiseHierarchy:
         self.soundbank.raise_modified() # type: ignore
         self.added_entries[new_entry.hierarchy_id] = new_entry
         self.entries[new_entry.hierarchy_id] = new_entry
-        self._categorized_entry(new_entry)
+        self.categorized_entry(new_entry)
         new_entry.soundbanks.append(self.soundbank)
             
     def remove_entry(self, entry: HircEntry):
@@ -2168,7 +2168,7 @@ class WwiseHierarchy:
                 self.removed_entries[entry.hierarchy_id] = entry
                 self.soundbank.raise_modified() # type: ignore
 
-            self._remove_categorized_entry(entry)
+            self.remove_categorized_entry(entry)
             
             del self.entries[entry.hierarchy_id]
             entry.soundbanks.remove(self.soundbank)
@@ -2244,7 +2244,7 @@ class WwiseHierarchy:
     def get_data(self):
         old_child_lists = {}
         old_size = {}
-        for mixer in self.get_actor_mixers():
+        for mixer in self.get_actor_mixers().values():
             old_child_lists[mixer.hierarchy_id] = mixer.children
             old_size[mixer.hierarchy_id] = mixer.size
             new_child_list = copy.deepcopy(mixer.children)
@@ -2260,75 +2260,134 @@ class WwiseHierarchy:
             
         arr = [entry.get_data() for entry in self.entries.values()]
         
-        for mixer in self.get_actor_mixers():
+        for mixer in self.get_actor_mixers().values():
             mixer.children = old_child_lists[mixer.hierarchy_id]
             mixer.size = old_size[mixer.hierarchy_id]
         
         return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
 
-    def _categorized_entry(self, entry: HircEntry):
+    def categorized_entry(self, entry: HircEntry):
         match entry.hierarchy_type:
             case 0x02:
-                assert(isinstance(entry, Sound))
-                self.sounds.append(entry)
+                if not isinstance(entry, Sound):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of Sound.")
+                if entry.hierarchy_id in self.sounds:
+                    raise AssertionError(f"Sound {entry.hierarchy_id} is already categorized.")
+                self.sounds[entry.hierarchy_id] = entry
             case 0x03:
-                assert(isinstance(entry, Action))
-                self.actions.append(entry)
+                if not isinstance(entry, Action):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of Action.")
+                if entry.hierarchy_id in self.actions:
+                    raise AssertionError(f"Action {entry.hierarchy_id} is already categorized.")
+                self.actions[entry.hierarchy_id] = entry
             case 0x04:
-                assert(isinstance(entry, Event))
-                self.events.append(entry)
+                if not isinstance(entry, Event):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of Event.")
+                if entry.hierarchy_id in self.events:
+                    raise AssertionError(f"Event {entry.hierarchy_id} is already categorized.")
+                self.events[entry.hierarchy_id] = entry
             case 0x05:
-                assert(isinstance(entry, RandomSequenceContainer))
-                self.random_sequence_containers.append(entry)
+                if not isinstance(entry, RandomSequenceContainer):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of RandomSequenceContainer.")
+                if entry.hierarchy_id in self.random_sequence_containers:
+                    raise AssertionError(f"RandomSequenceContainer {entry.hierarchy_id} is already categorized.")
+                self.random_sequence_containers[entry.hierarchy_id] = entry
             case 0x06:
-                assert(isinstance(entry, SwitchContainer))
-                self.switch_containers.append(entry)
+                if not isinstance(entry, SwitchContainer):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of SwitchContainer.")
+                if entry.hierarchy_id in self.switch_containers:
+                    raise AssertionError(f"SwitchContainer {entry.hierarchy_id} is already categorized.")
+                self.switch_containers[entry.hierarchy_id] = entry
             case 0x07:
-                assert(isinstance(entry, ActorMixer))
-                self.actor_mixers.append(entry)
+                if not isinstance(entry, ActorMixer):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of ActorMixer.")
+                if entry.hierarchy_id in self.actor_mixers:
+                    raise AssertionError(f"ActorMixer {entry.hierarchy_id} is already categorized.")
+                self.actor_mixers[entry.hierarchy_id] = entry
             case 0x09:
-                assert(isinstance(entry, LayerContainer))
-                self.layer_container.append(entry)
+                if not isinstance(entry, LayerContainer):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of LayerContainer.")
+                if entry.hierarchy_id in self.layer_container:
+                    raise AssertionError(f"LayerContainer {entry.hierarchy_id} is already categorized.")
+                self.layer_container[entry.hierarchy_id] = entry
             case 0x0A:
-                assert(isinstance(entry, MusicSegment))
-                self.music_segments.append(entry)
+                if not isinstance(entry, MusicSegment):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of MusicSegment.")
+                if entry.hierarchy_id in self.music_segments:
+                    raise AssertionError(f"MusicSegment {entry.hierarchy_id} is already categorized.")
+                self.music_segments[entry.hierarchy_id] = entry
             case 0x0B:
-                assert(isinstance(entry, MusicTrack))
-                self.music_tracks.append(entry)
+                if not isinstance(entry, MusicTrack):
+                    raise AssertionError(f"Entry {entry.hierarchy_id} is not type of MusicTrack.")
+                if entry.hierarchy_id in self.music_tracks:
+                    raise AssertionError(f"MusicTrack {entry.hierarchy_id} is already categorized.")
+                self.music_tracks[entry.hierarchy_id] = entry
             case _:
-                self.uncategorized.append(entry)
+                if entry.hierarchy_id in self.uncategorized:
+                    raise AssertionError(f"Hirc Entry {entry.hierarchy_id} is already categorized.")
+                self.uncategorized[entry.hierarchy_id] = entry
 
-    def _remove_categorized_entry(self, entry: HircEntry):
+    def remove_categorized_entry(self, entry: HircEntry):
+        hirc_id = entry.hierarchy_id
         match entry.hierarchy_type:
             case 0x02:
-                assert(isinstance(entry, Sound))
-                self.sounds.remove(entry)
+                if not isinstance(entry, Sound):
+                    raise AssertionError(f"Entry {hirc_id} is not type of Sound.")
+                if entry.hierarchy_id not in self.sounds:
+                    raise AssertionError(f"Sound {hirc_id} is not categorized.")
+                self.sounds.pop(entry.hierarchy_id)
             case 0x03:
-                assert(isinstance(entry, Action))
-                self.actions.remove(entry)
+                if not isinstance(entry, Action):
+                    raise AssertionError(f"Entry {hirc_id} is not type of Action.")
+                if entry.hierarchy_id not in self.actions:
+                    raise AssertionError(f"Action {hirc_id} is not categorized.")
+                self.actions.pop(entry.hierarchy_id)
             case 0x04:
-                assert(isinstance(entry, Event))
-                self.events.remove(entry)
+                if not isinstance(entry, Event):
+                    raise AssertionError(f"Entry {hirc_id} is not type of Event.")
+                if entry.hierarchy_id not in self.events:
+                    raise AssertionError(f"Event {hirc_id} is not categorized.")
+                self.events.pop(entry.hierarchy_id)
             case 0x05:
-                assert(isinstance(entry, RandomSequenceContainer))
-                self.random_sequence_containers.remove(entry)
+                if not isinstance(entry, RandomSequenceContainer):
+                    raise AssertionError(f"Entry {hirc_id} is not type of RandomSequenceContainer.")
+                if entry.hierarchy_id not in self.random_sequence_containers:
+                    raise AssertionError(f"RandomSequenceContainer {hirc_id} is not categorized.")
+                self.random_sequence_containers.pop(entry.hierarchy_id)
             case 0x06:
-                assert(isinstance(entry, SwitchContainer))
-                self.switch_containers.remove(entry)
+                if not isinstance(entry, SwitchContainer):
+                    raise AssertionError(f"Entry {hirc_id} is not type of SwitchContainer.")
+                if entry.hierarchy_id not in self.switch_containers:
+                    raise AssertionError(f"SwitchContainer {hirc_id} is not categorized.")
+                self.switch_containers.pop(entry.hierarchy_id)
             case 0x07:
-                assert(isinstance(entry, ActorMixer))
-                self.actor_mixers.remove(entry)
+                if not isinstance(entry, ActorMixer):
+                    raise AssertionError(f"Entry {hirc_id} is not type of ActorMixer.")
+                if entry.hierarchy_id not in self.actor_mixers:
+                    raise AssertionError(f"ActorMixer {hirc_id} is not categorized.")
+                self.actor_mixers.pop(entry.hierarchy_id)
             case 0x09:
-                assert(isinstance(entry, LayerContainer))
-                self.layer_container.remove(entry)
+                if not isinstance(entry, LayerContainer):
+                    raise AssertionError(f"Entry {hirc_id} is not type of LayerContainer.")
+                if entry.hierarchy_id not in self.layer_container:
+                    raise AssertionError(f"LayerContainer {hirc_id} is not categorized.")
+                self.layer_container.pop(entry.hierarchy_id)
             case 0x0A:
-                assert(isinstance(entry, MusicSegment))
-                self.music_segments.remove(entry)
+                if not isinstance(entry, MusicSegment):
+                    raise AssertionError(f"Entry {hirc_id} is not type of MusicSegment.")
+                if entry.hierarchy_id not in self.music_segments:
+                    raise AssertionError(f"MusicSegment {hirc_id} is not categorized.")
+                self.music_segments.pop(entry.hierarchy_id)
             case 0x0B:
-                assert(isinstance(entry, MusicTrack))
-                self.music_tracks.remove(entry)
+                if not isinstance(entry, MusicTrack):
+                    raise AssertionError(f"Entry {hirc_id} is not type of MusicTrack.")
+                if entry.hierarchy_id not in self.music_tracks:
+                    raise AssertionError(f"MusicTrack {hirc_id} is not categorized.")
+                self.music_tracks.pop(entry.hierarchy_id)
             case _:
-                self.uncategorized.remove(entry)
+                if entry.hierarchy_id not in self.uncategorized:
+                    raise AssertionError(f"Entry {hirc_id} is not categorized.")
+                self.uncategorized.pop(entry.hierarchy_id)
 
 class FxChunk:
     """
