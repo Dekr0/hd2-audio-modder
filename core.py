@@ -1814,13 +1814,7 @@ class Mod:
                 )
                 continue
 
-            try:
-                self.wwise_banks[bank_id].import_hierarchy(bank.hierarchy) # type: ignore
-            except BaseException as err:
-                logger.error(
-                    f"Unable import hierarchy information for {bank.dep.data}" # type: ignore
-                    f": {err}"
-                ) 
+            self.wwise_banks[bank_id].import_hierarchy(bank.hierarchy)
 
         for text_bank in patch_game_archive.get_text_banks().values():
             bank_id = text_bank.file_id
@@ -1831,10 +1825,7 @@ class Mod:
                 )
                 continue
 
-            try:
-                self.text_banks[bank_id].import_text(text_bank)
-            except BaseException as err:
-                logger.warning(f"Unable import text data from text bank {bank_id}")
+            self.text_banks[bank_id].import_text(text_bank)
 
     def write_patch(self, output_folder: str = ""):
         """
