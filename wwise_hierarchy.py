@@ -466,7 +466,10 @@ class Action(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0]
+        bank: WwiseBank = self.soundbanks[0] # type: ignore
+        hierarchy: WwiseHierarchy | None = bank.hierarchy
+        if hierarchy == None:
+            raise AssertionError(f"WwiseBank {bank.get_id()} has no hierachy.")
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1714,7 +1717,10 @@ class Event(HircEntry):
         self.modified = True
         self.update_size()
 
-        hirc: WwiseHierarchy = self.soundbanks[0]
+        bank: WwiseBank = self.soundbanks[0] # type: ignore
+        hirc: WwiseHierarchy | None = bank.hierarchy
+        if hirc == None:
+            raise AssertionError(f"WwiseBank {bank.get_id()} has no hierachy.")
         parent_id = self.get_parent_id()
         if parent_id != None and hirc.has_entry(parent_id):
             self.parent = hirc.get_entry(parent_id)
@@ -1859,7 +1865,10 @@ class RandomSequenceContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hirc: WwiseHierarchy = self.soundbanks[0]
+        bank: WwiseBank = self.soundbanks[0] # type: ignore
+        hirc: WwiseHierarchy | None = bank.hierarchy
+        if hirc == None:
+            raise AssertionError(f"WwiseBank {bank.get_id()} has no hierachy.")
         parent_id = self.get_parent_id()
         if parent_id != None and hirc.has_entry(parent_id):
             self.parent = hirc.get_entry(parent_id)
@@ -2032,7 +2041,10 @@ class Sound(HircEntry):
         self.modified = True
         self.update_size()
 
-        hirc: WwiseHierarchy = self.soundbanks[0]
+        bank: WwiseBank = self.soundbanks[0] # type: ignore
+        hirc: WwiseHierarchy | None = bank.hierarchy
+        if hirc == None:
+            raise AssertionError(f"WwiseBank {bank.get_id()} has no hierachy.")
         parent_id = self.get_parent_id()
         if parent_id != None and hirc.has_entry(parent_id):
             self.parent = hirc.get_entry(parent_id)
@@ -3391,7 +3403,10 @@ class LayerContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hirc: WwiseHierarchy = self.soundbanks[0]
+        bank: WwiseBank = self.soundbanks[0] # type: ignore
+        hirc: WwiseHierarchy | None = bank.hierarchy
+        if hirc == None:
+            raise AssertionError(f"WwiseBank {bank.get_id()} has no hierachy.")
         parent_id = self.get_parent_id()
         if parent_id != None and hirc.has_entry(parent_id):
             self.parent = hirc.get_entry(parent_id)
@@ -3502,7 +3517,10 @@ class ActorMixer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hirc: WwiseHierarchy = self.soundbanks[0]
+        bank: WwiseBank = self.soundbanks[0] # type: ignore
+        hirc: WwiseHierarchy | None = bank.hierarchy
+        if hirc == None:
+            raise AssertionError(f"WwiseBank {bank.get_id()} has no hierachy.")
         parent_id = self.get_parent_id()
         if parent_id != None and hirc.has_entry(parent_id):
             self.parent = hirc.get_entry(parent_id)
@@ -3735,7 +3753,10 @@ class SwitchContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hirc: WwiseHierarchy = self.soundbanks[0]
+        bank: WwiseBank = self.soundbanks[0] # type: ignore
+        hirc: WwiseHierarchy | None = bank.hierarchy
+        if hirc == None:
+            raise AssertionError(f"WwiseBank {bank.get_id()} has no hierachy.")
         parent_id = self.get_parent_id()
         if parent_id != None and hirc.has_entry(parent_id):
             self.parent = hirc.get_entry(parent_id)
