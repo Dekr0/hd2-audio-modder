@@ -895,13 +895,16 @@ class GameArchive:
         entries_with_audio_sources = hirc.get_sounds() + hirc.get_music_tracks()
         for entry_with_audio_source in entries_with_audio_sources:
             for source_struct in entry_with_audio_source.sources:
-                audio_source = self._create_audio_source(
+                audio_sources = self._create_audio_source(
                     source_struct, media_index, hirc, dep
                 )
-                if audio_source == None:
+                if audio_sources == None:
                     continue
-                self.audio_sources[audio_source.short_id] = audio_source
-
+                if isinstance(audio_sources, list):
+                    for audio_source in audio_sources:
+                        self.audio_sources[audio_source.short_id] = audio_source
+                else:
+                    self.audio_sources[audio_sources.short_id] = audio_sources
 
     def _create_audio_source(
         self, 
@@ -909,7 +912,7 @@ class GameArchive:
         media_index: MediaIndex,
         hirc: WwiseHierarchy,
         dep: WwiseDep
-    ) -> AudioSource | None:
+    ) -> AudioSource | list[AudioSource] | None:
         """
         Question: for REV_AUDIO, it uses media index ID. Should we use source 
         ID to check for duplication again?
@@ -941,15 +944,20 @@ class GameArchive:
             return None
 
         if stream_type == BANK and plugin_id == REV_AUDIO:
-            if hirc.has_entry(source_id):
+            if not hirc.has_entry(source_id):
                 logger.error(
                     f"There's no custom FX hierarchy entry associated with audio"
                     f" source {source_id}!"
                 )
                 return None
-            return self._create_audio_source_type_rev_audio(
-                hirc.get_entry(source_id), media_index
-            )
+            fx = hirc.get_entry(source_id)
+            if not isinstance(fx, FxCustom):
+                logger.error(
+                    f"Hierarchy {source_id} is not an instance of FxCustom"
+                )
+                return None
+            return self._create_audio_source_type_rev_audio_new(fx, media_index)
+
         if stream_type == BANK:
             if source_id not in media_index.data:
                 logger.error(
@@ -977,6 +985,28 @@ class GameArchive:
         )
 
         return audio
+
+    def _create_audio_source_type_rev_audio_new(
+        self, fx: FxCustom, media_index: MediaIndex,
+    ) -> list[AudioSource]:
+        audio_list: list[AudioSource] = []
+        for m in fx.media_map:
+            if m.source_id not in media_index.data:
+                logger.error(
+                    f"There is no media index data associated with {m.source_id}"
+                )
+                continue
+            audio = AudioSource()
+            audio.parents.add(fx)
+            audio.stream_type = BANK
+            audio.short_id = m.source_id
+            audio.set_data(
+                media_index.data[m.source_id],
+                set_modified=False,
+                notify_subscribers=False
+            )
+            audio_list.append(audio)
+        return audio_list
 
     def _create_audio_source_type_rev_audio(
         self, 
@@ -1205,7 +1235,7 @@ class SoundHandler:
             self.audio_id = -1
             return
 
-        wem = f"{xpath.join(TMP, f"temp{sound_id}")}.wem"
+        wem = f"{xpath.join(TMP, f'temp{sound_id}')}.wem"
 
         async with aiofiles.open(wem, 'wb') as f:
             await f.write(sound_data)
@@ -1971,7 +2001,7 @@ class Mod:
         
         return True
 
-    def write_patch(self, output_folder: str = "", overwrite: bool = False):
+    def write_patch(self, output_folder: str = "", overwrite: bool = True):
         """
         @exception
         - OSError
