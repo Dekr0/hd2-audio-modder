@@ -2030,6 +2030,8 @@ class HircEntryFactory:
                 entry = MusicSegment.from_memory_stream(stream)
             case 0X0B: # music track
                 entry = MusicTrack.from_memory_stream(stream)
+            case 0x11:
+                entry = FxCustom.from_memory_stream(stream)
             case _:
                 entry = HircEntry.from_memory_stream(stream)
         return entry
@@ -2186,6 +2188,14 @@ class WwiseHierarchy:
 
     def get_switches_container(self):
         return self.switch_containers
+
+    def get_switch_container_by_id(self, _id: int):
+        entry = self.entries[_id]
+        if not isinstance(entry, SwitchContainer):
+            raise AssertionError(
+                f"Hierarchy entry {_id} is not a switch container."
+            )
+        return entry
 
     def get_entries(self):
         return self.entries.values()
@@ -2435,6 +2445,18 @@ class PropBundle:
             return
 
         raise AssertionError("Assertion failed. Reached invalid code path.")
+
+    def remove_prop_value(self, pid: int):
+        if self.cProps == 0:
+            return
+
+        if pid not in self.pIDs:
+            raise AssertionError(f"Property ID {pid} does not exist.")
+
+        index = self.pIDs.index(pid)
+        self.pIDs.pop(index)
+        self.pValues.pop(index)
+        self.cProps -= 1
 
     def get_data(self):
         assert_equal("# of props != # of prop. IDs", self.cProps, len(self.pIDs))
@@ -3508,7 +3530,7 @@ class SwitchContainer(HircEntry):
         self.ulNumSwitchGroups: int = 0
         self.switchGroups: list[SwitchGroup] = []
         self.ulNumSwitchParams: int = 0
-        self.switchParms: list[SwitchParam] = []
+        self.switchParams: list[SwitchParam] = []
         
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -3541,7 +3563,7 @@ class SwitchContainer(HircEntry):
             SwitchGroup.from_memory_stream(stream) for _ in range(s.ulNumSwitchGroups)
         ]
         s.ulNumSwitchParams = stream.uint32_read()
-        s.switchParms = [
+        s.switchParams = [
             SwitchParam.from_memory_stream(stream) for _ in range(s.ulNumSwitchParams)
         ]
 
@@ -3641,10 +3663,10 @@ class SwitchContainer(HircEntry):
             "# of SwitchParameter counter mismatch # of SwitchParameter in the "
             "list",
             self.ulNumSwitchParams,
-            len(self.switchParms)
+            len(self.switchParams)
         )
 
-        for switchParam in self.switchParms:
+        for switchParam in self.switchParams:
             data += switchParam.get_data()
 
         return data
@@ -3714,3 +3736,92 @@ def ak_media_id(db: SQLiteDatabase, retry: int = 32):
             f"(# of retry remains: {retry})..."
         )
     raise KeyError("Failed to generate media ID. Please try to generate again!")
+
+
+class FxCustomMedia:
+
+    def __init__(self, index: int, source_id: int):
+        self.index: int = index
+        self.source_id: int = source_id
+
+    @classmethod
+    def from_memory_stream(cls, s: MemoryStream) -> 'FxCustomMedia':
+        return FxCustomMedia(s.uint8_read(), s.uint32_read())
+
+    def encode(self):
+        return struct.pack("<BI", self.index, self.source_id)
+
+
+class FxCustom(HircEntry):
+
+    def __init__(self):
+        super().__init__()
+        self.fld: int = 0
+        self.plugin_data: bytearray = bytearray()
+        self.media_map: list[FxCustomMedia] = []
+        self.unparsed_data: bytearray = bytearray()
+
+    def plugin_in_type(self):
+        return (self.fld >> 0) & 0x000F
+
+    def company(self):
+        return (self.fld >> 4) & 0x03FF
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        fx = FxCustom()
+
+        fx.hierarchy_type = stream.uint8_read()
+
+        fx.size = stream.uint32_read()
+
+        head = stream.tell()
+
+        fx.hierarchy_id = stream.uint32_read()
+
+        fx.fld = stream.uint32_read()
+
+        if fx.fld:
+            if fx.fld > 0:
+                plugin_data_size = stream.uint32_read()
+                if plugin_data_size > 0:
+                    fx.plugin_data = stream.read(plugin_data_size)
+
+        fx.media_map = [FxCustomMedia.from_memory_stream(stream) for _ in range(stream.uint8_read())]
+
+        fx.unparsed_data = stream.read(fx.size - (stream.tell() - head))
+
+        tail = stream.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for FxCustomer {fx.hierarchy_id}",
+            fx.size, tail - head
+        )
+
+        return fx
+
+    def get_data(self):
+        data = self._pack()
+        assert_equal(
+            f"Header size and packed data size mismatch for ActorMixer {self.hierarchy_id}",
+            self.size, len(data) 
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def _pack(self):
+        data = struct.pack("<II", self.hierarchy_id, self.fld)
+        if self.fld:
+            if self.fld > 0:
+                data += struct.pack("<I", len(self.plugin_data))
+                data += self.plugin_data
+
+        data += struct.pack("<B", len(self.media_map))
+        for m in self.media_map:
+            data += m.encode()
+
+        data += self.unparsed_data
+
+        return  data
