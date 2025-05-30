@@ -15,3 +15,6 @@ __pycache__/
 **/log.txt
 **/*.pickle
 **/*.patch_*
+Jeep.wem
+HAT.ini
+friendlynames.db
