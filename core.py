@@ -135,6 +135,7 @@ class WwiseDep:
 
     def __init__(self):
         self.data: str = ""
+        self.omit: bool = False
         
     def from_memory_stream(self, stream: MemoryStream):
         self.offset = stream.tell()
@@ -515,15 +516,32 @@ class GameArchive:
     def to_file(self, path: str):
         toc_file = MemoryStream()
         stream_file = MemoryStream()
-        self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks)
-        self.num_types = (1 if self.wwise_streams else 0) + (1 if self.text_banks else 0) + (2 if self.wwise_banks else 0)
+
+        wwise_deps_count = 0
+        for bnk in self.wwise_banks.values():
+            if bnk.dep == None or bnk.dep.omit:
+                continue
+            wwise_deps_count += 1
+        print(f"# of Wwise Dependency: {wwise_deps_count}")
+
+        self.num_files = len(self.wwise_streams) + len(self.wwise_banks) + len(self.text_banks) + wwise_deps_count
+        self.num_types = 0
+        if len(self.wwise_streams) > 0:
+            self.num_types += 1
+        if len(self.text_banks) > 0:
+            self.num_types += 1
+        if len(self.wwise_banks) > 0:
+            self.num_types += 1
+        if wwise_deps_count > 0:
+            self.num_types += 1
+        print(f"# of file types: {self.num_types}")
         
         # write header
         toc_file.write(struct.pack("<IIII56s", self.magic, self.num_types, self.num_files, self.unknown, self.unk4Data))
         
         self.write_type_header(toc_file, WWISE_STREAM, len(self.wwise_streams))
         self.write_type_header(toc_file, WWISE_BANK, len(self.wwise_banks))
-        self.write_type_header(toc_file, WWISE_DEP, len(self.wwise_banks))
+        self.write_type_header(toc_file, WWISE_DEP, wwise_deps_count)
         self.write_type_header(toc_file, TEXT_BANK, len(self.text_banks))
         
         toc_data_offset = toc_file.tell() + 80 * self.num_files + 8
@@ -595,6 +613,10 @@ class GameArchive:
                 raise AssertionError(
                     f"WwiseBank {bank.file_id} does not has a WwsieDep."
                 )
+
+            if bank.dep.omit:
+                print("Omitting one Wwise Dependency")
+                continue
 
             dep_data = bank.dep.get_data()
             toc_entry = TocHeader()
@@ -887,7 +909,9 @@ class GameArchive:
         if bank.hierarchy == None:
             raise AssertionError(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
         if bank.dep == None:
-            raise AssertionError(f"WwiseBank {bank.file_id} has no WwiseDep")
+            bank.dep = WwiseDep()
+            bank.dep.data = f"omit_{self.name}_{bank.file_id}"
+            bank.dep.omit = True
 
         hirc = bank.hierarchy
         dep = bank.dep
